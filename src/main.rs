@@ -93,8 +93,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    let csv_filename =
+        generate_unique_filename(&arguments.dataset_id, &arguments.data_dictionary_id);
     // Create a csv since the validation is successful. Use schema-aware parsing for proper date formatting.
-    let csv_filename = generate_unique_filename(&arguments.dataset_id);
     match validator.export_to_csv(
         &arguments.excel_file,
         arguments.sheet_name.as_deref(),

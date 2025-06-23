@@ -1,8 +1,8 @@
 use chrono::prelude::*;
 
-pub fn generate_unique_filename(dataset_id: &str) -> String {
+pub fn generate_unique_filename(dataset_id: &str, data_dictionary_id: &str) -> String {
     let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-    let filename = format!("{dataset_id}_{timestamp}.csv");
+    let filename = format!("{dataset_id}_{data_dictionary_id}_{timestamp}.csv");
     return filename;
 }
 
