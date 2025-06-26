@@ -133,7 +133,7 @@ Errors:
 ### CSV Output
 Valid data is exported to a timestamped CSV file with the format:
 ```
-{dataset_id}_{YYYY-MM-DD_HH-MM-SS}.csv
+{dataset_id}_{data_dictionary_id}_{YYYY-MM-DD_HH-MM-SS}.csv
 ```
 
 ## Authentication
