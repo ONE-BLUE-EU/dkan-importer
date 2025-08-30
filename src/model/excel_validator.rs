@@ -32,7 +32,7 @@ pub enum ValidationError {
     #[error("Value out of range at {path}: {message}")]
     OutOfRange { path: String, message: String },
 
-    #[error("Additional properties not allowed at {path}: {properties:?}")]
+    #[error("Excel has the following extra columns not found in the provided data dictionary at {path}: {properties:?}")]
     AdditionalProperties {
         path: String,
         properties: Vec<String>,
@@ -92,7 +92,7 @@ pub struct FieldSchema {
 pub struct ExcelValidator {
     pub validator: Validator,
     field_schemas: HashMap<String, FieldSchema>,
-    error_log: BufWriter<File>,
+    error_log_path: String,
     pub validation_reports: Vec<ValidationReport>,
 }
 
@@ -105,14 +105,10 @@ impl ExcelValidator {
         // Extract field schemas for intelligent type coercion
         let field_schemas = Self::extract_field_schemas(schema)?;
 
-        // Create error log file
-        let error_file = File::create(error_log_path)?;
-        let error_log = BufWriter::new(error_file);
-
         Ok(ExcelValidator {
             validator,
             field_schemas,
-            error_log,
+            error_log_path: error_log_path.to_string(),
             validation_reports: Vec::new(),
         })
     }
@@ -130,6 +126,26 @@ impl ExcelValidator {
         }
 
         Ok(field_schemas)
+    }
+
+    /// Normalize Excel header to match DKAN dictionary titles
+    /// Replaces newlines and control characters with spaces (but keeps asterisks and full text)
+    pub fn normalize_excel_header(raw_header: String) -> String {
+        raw_header
+            .chars() // Process character by character
+            .map(|c| {
+                if c.is_control() {
+                    ' ' // Replace control characters (newlines, tabs, etc.) with spaces
+                } else {
+                    c // Keep all other characters including asterisks
+                }
+            })
+            .collect::<String>()
+            .split_whitespace() // Split on whitespace to normalize multiple spaces
+            .collect::<Vec<&str>>()
+            .join(" ") // Join back with single spaces
+            .trim() // Remove leading/trailing whitespace
+            .to_string()
     }
 
     /// Parse individual field schema into our FieldSchema structure
@@ -244,8 +260,11 @@ impl ExcelValidator {
         // Process each row
         for (row_idx, row) in range.rows().enumerate() {
             if row_idx == 0 {
-                // First row contains headers
-                headers = row.iter().map(|cell| cell.to_string()).collect();
+                // First row contains headers - normalize them to match DKAN titles
+                headers = row
+                    .iter()
+                    .map(|cell| Self::normalize_excel_header(cell.to_string()))
+                    .collect();
                 continue;
             }
 
@@ -833,47 +852,52 @@ impl ExcelValidator {
         Ok(s.to_string())
     }
 
-    fn write_error_log(&mut self) -> Result<()> {
-        writeln!(self.error_log, "Excel Validation Error Report")?;
-        writeln!(self.error_log, "=============================")?;
+    fn write_error_log(&self) -> Result<()> {
+        // Only create the error file if we have errors to log
+        if self.validation_reports.is_empty() {
+            return Ok(()); // No errors, no file needed
+        }
+
+        // Create error log file only when we have errors
+        let error_file = File::create(&self.error_log_path)?;
+        let mut error_log = BufWriter::new(error_file);
+
+        writeln!(error_log, "Excel Validation Error Report")?;
+        writeln!(error_log, "=============================")?;
 
         // Generate ISO 8601 formatted timestamp
         let now = chrono::Utc::now().to_rfc3339();
-        writeln!(self.error_log, "Generated at: {}", now)?;
-        writeln!(self.error_log)?;
+        writeln!(error_log, "Generated at: {}", now)?;
+        writeln!(error_log)?;
 
-        if self.validation_reports.is_empty() {
-            writeln!(self.error_log, "No validation errors found!")?;
-        } else {
+        writeln!(
+            error_log,
+            "Total rows with errors: {}",
+            self.validation_reports.len()
+        )?;
+        writeln!(error_log)?;
+
+        for report in &self.validation_reports {
             writeln!(
-                self.error_log,
-                "Total rows with errors: {}",
-                self.validation_reports.len()
+                error_log,
+                "Row {}: {} error(s)",
+                report.row_number,
+                report.errors.len()
             )?;
-            writeln!(self.error_log)?;
+            writeln!(
+                error_log,
+                "Row data: {}",
+                serde_json::to_string_pretty(&report.row_data)?
+            )?;
+            writeln!(error_log, "Errors:")?;
 
-            for report in &self.validation_reports {
-                writeln!(
-                    self.error_log,
-                    "Row {}: {} error(s)",
-                    report.row_number,
-                    report.errors.len()
-                )?;
-                writeln!(
-                    self.error_log,
-                    "Row data: {}",
-                    serde_json::to_string_pretty(&report.row_data)?
-                )?;
-                writeln!(self.error_log, "Errors:")?;
-
-                for error in &report.errors {
-                    writeln!(self.error_log, "  - {}", error)?;
-                }
-                writeln!(self.error_log)?;
+            for error in &report.errors {
+                writeln!(error_log, "  - {}", error)?;
             }
+            writeln!(error_log)?;
         }
 
-        self.error_log.flush()?;
+        error_log.flush()?;
         Ok(())
     }
 
@@ -1111,8 +1135,39 @@ impl ExcelValidator {
 
     fn extract_additional_properties(&self, error_msg: &str) -> Vec<String> {
         // Extract property names from additional properties errors
-        // This is a simplified extraction - could be enhanced further
-        vec![format!("Additional property mentioned in: {}", error_msg)]
+        // Look for patterns like 'property1', 'property2' in the error message
+        let mut properties = Vec::new();
+
+        // Find all text within single quotes
+        let mut chars = error_msg.chars().peekable();
+        let mut current_property = String::new();
+        let mut in_quote = false;
+
+        while let Some(ch) = chars.next() {
+            if ch == '\'' {
+                if in_quote {
+                    // End of quoted property name
+                    if !current_property.is_empty() {
+                        properties.push(current_property.clone());
+                        current_property.clear();
+                    }
+                    in_quote = false;
+                } else {
+                    // Start of quoted property name
+                    in_quote = true;
+                    current_property.clear();
+                }
+            } else if in_quote {
+                current_property.push(ch);
+            }
+        }
+
+        // If we couldn't extract specific properties, return the original message
+        if properties.is_empty() {
+            properties.push(error_msg.to_string());
+        }
+
+        properties
     }
 
     fn enhance_range_error_message(&self, error_msg: &str, instance: &Value) -> String {

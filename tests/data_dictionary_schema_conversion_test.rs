@@ -19,7 +19,8 @@ fn test_datetime_with_dkan_format() {
     });
 
     let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let props = &json_schema["properties"]["date_field"];
+    // Properties are now named after titles
+    let props = &json_schema["properties"]["Date Field"];
     assert_eq!(props["type"], json!(["string", "null"])); // Now datetime fields get null union when optional
     assert_eq!(props["format"], "%Y/%m/%d");
     assert_eq!(props["dkan_format"], "%Y/%m/%d");
@@ -41,7 +42,8 @@ fn test_datetime_with_default_format() {
     });
 
     let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let props = &json_schema["properties"]["date_field"];
+    // Properties are now named after titles
+    let props = &json_schema["properties"]["Date Field"];
     assert_eq!(props["type"], json!(["string", "null"])); // Now datetime fields get null union when optional
     assert_eq!(props["format"], "date-time");
     assert!(props.get("dkan_format").is_none());
@@ -92,19 +94,20 @@ fn test_dkan_schema_conversion_basic() {
     let properties = &json_schema["properties"];
 
     // id field is not mandatory (no required constraint), so it should allow null
-    assert_eq!(properties["id"]["type"], json!(["integer", "null"]));
+    // Properties are now named after titles
+    assert_eq!(properties["ID"]["type"], json!(["integer", "null"]));
 
     // name field is mandatory (required: true), so it should be just string
-    assert_eq!(properties["name"]["type"], "string");
-    assert_eq!(properties["name"]["minLength"], 1);
-    assert_eq!(properties["name"]["maxLength"], 100);
+    assert_eq!(properties["Name"]["type"], "string");
+    assert_eq!(properties["Name"]["minLength"], 1);
+    assert_eq!(properties["Name"]["maxLength"], 100);
 
     // score field is not mandatory (no required constraint), so it should allow null
-    assert_eq!(properties["score"]["type"], json!(["number", "null"]));
-    assert_eq!(properties["score"]["minimum"], 0.0);
-    assert_eq!(properties["score"]["maximum"], 100.0);
+    assert_eq!(properties["Score"]["type"], json!(["number", "null"]));
+    assert_eq!(properties["Score"]["minimum"], 0.0);
+    assert_eq!(properties["Score"]["maximum"], 100.0);
 
-    // Check required fields
+    // Check required fields (properties are now named after titles)
     let required = &json_schema["required"];
-    assert!(required.as_array().unwrap().contains(&json!("name")));
+    assert!(required.as_array().unwrap().contains(&json!("Name")));
 }

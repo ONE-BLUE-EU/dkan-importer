@@ -37,7 +37,6 @@ fn test_excel_datetime_to_chrono() {
 
     // Since the method is static and works with as_f64(), we know it's working
     // if the schema intelligence methods work correctly (which we test separately)
-    println!("test_excel_datetime_to_chrono: Tested indirectly via schema intelligence methods");
 
     // This is a placeholder - in a real scenario, you'd create a test Excel file
     // with known datetime values and verify the conversion
@@ -87,9 +86,7 @@ fn test_convert_datetime_with_schema_intelligence() {
     assert_eq!(date_value.as_str().unwrap(), "2024-09-15");
     assert_eq!(datetime_value.as_str().unwrap(), "2024-09-15T12:00:00");
 
-    println!(
-        "test_convert_datetime_with_schema_intelligence: Core logic verified via string conversion"
-    );
+    // Core logic verified via string conversion test above
 }
 
 #[test]

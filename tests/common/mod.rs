@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use tempfile::NamedTempFile;
 
 /// Creates a basic test schema for testing purposes
+#[allow(dead_code)]
 pub fn create_test_schema() -> Value {
     json!({
         "type": "object",
@@ -42,6 +43,7 @@ pub fn create_test_error_log_file() -> NamedTempFile {
 }
 
 /// Creates a test validator with the default test schema
+#[allow(dead_code)]
 pub fn create_test_validator() -> ExcelValidator {
     let schema = create_test_schema();
     let error_log_file = create_test_error_log_file();

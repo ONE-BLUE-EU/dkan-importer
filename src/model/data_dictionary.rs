@@ -109,6 +109,9 @@ impl DataDictionary {
             let field_format = field.get("format").and_then(|f| f.as_str());
             let field_description = field.get("description").and_then(|d| d.as_str());
 
+            // Use title as JSON Schema property name if available, otherwise fall back to name
+            let schema_property_name = field_title.unwrap_or(field_name);
+
             // Check if either name or title ends with asterisk (*) - preserve original values
             let name_indicates_required = field_name.trim_end().ends_with('*');
             let title_indicates_required = if let Some(title) = field_title {
@@ -177,7 +180,7 @@ impl DataDictionary {
 
             // Add field to required list if it's marked as required (either by constraints or asterisk in title)
             if will_be_required {
-                required_fields.push(field_name.to_string());
+                required_fields.push(schema_property_name.to_string());
             }
 
             // Add any additional constraints based on field properties
@@ -219,7 +222,7 @@ impl DataDictionary {
                 }
             }
 
-            properties.insert(field_name.to_string(), Value::Object(property));
+            properties.insert(schema_property_name.to_string(), Value::Object(property));
         }
 
         // Build the complete JSON Schema
