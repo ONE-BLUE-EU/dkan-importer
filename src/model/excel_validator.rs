@@ -15,11 +15,12 @@ pub type ExcelProcessingResult = (Vec<String>, Vec<ParsedExcelRow>);
 
 #[derive(Error, Debug, Clone)]
 pub enum ValidationError {
-    #[error("Type mismatch at {path}: expected {expected}, got {actual}")]
+    #[error("Type mismatch at {path}: expected {expected}, got {actual} \"{value}\"")]
     TypeMismatch {
         path: String,
         expected: String,
         actual: String,
+        value: String,
     },
 
     #[error("Required field missing at {path}: {field}")]
@@ -913,7 +914,7 @@ impl ExcelValidator {
     }
 
     /// Analyzes jsonschema error messages and converts them to appropriate ValidationError types
-    fn analyze_jsonschema_error(
+    pub fn analyze_jsonschema_error(
         &self,
         error_msg: &str,
         path: &str,
@@ -930,6 +931,7 @@ impl ExcelValidator {
                 path: path.to_string(),
                 expected: expected_type,
                 actual: actual_type,
+                value: self.safe_value_string(instance),
             };
         }
 
