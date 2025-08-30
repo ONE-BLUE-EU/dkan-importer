@@ -814,12 +814,8 @@ impl ExcelValidator {
         writeln!(self.error_log, "Excel Validation Error Report")?;
         writeln!(self.error_log, "=============================")?;
 
-        // Use a simpler timestamp format that doesn't require chrono
-        use std::time::SystemTime;
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        // Generate ISO 8601 formatted timestamp
+        let now = chrono::Utc::now().to_rfc3339();
         writeln!(self.error_log, "Generated at: {}", now)?;
         writeln!(self.error_log)?;
 
