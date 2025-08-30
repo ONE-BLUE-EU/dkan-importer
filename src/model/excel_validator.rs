@@ -303,22 +303,6 @@ impl ExcelValidator {
         }
 
         for (row_number, json_obj) in parsed_rows {
-            // Comma check
-            for (key, value) in &json_obj {
-                if value.is_string() && value.as_str().unwrap().contains(',') {
-                    // Store for later reporting
-                    self.validation_reports.push(ValidationReport {
-                        row_number,
-                        errors: vec![ValidationError::InvalidFormat {
-                            path: key.to_string(),
-                            message: "The value contains a comma".to_string(),
-                        }],
-                        row_data: json_obj.clone().into(),
-                    });
-                    continue;
-                }
-            }
-
             let mut row_value = Value::Object(json_obj);
 
             // Apply additional intelligent type coercion if initial validation fails
@@ -363,9 +347,9 @@ impl ExcelValidator {
     ) -> Result<()> {
         let (headers, parsed_rows) = self.process_excel_rows(excel_path, sheet_name)?;
 
-        // Configure CSV writer to always quote fields
+        // Configure CSV writer to quote fields when necessary (e.g., when they contain commas)
         let mut wtr = csv::WriterBuilder::new()
-            .quote_style(csv::QuoteStyle::Never)
+            .quote_style(csv::QuoteStyle::Necessary)
             .from_path(csv_path)?;
 
         // Write headers - no manual escaping needed, csv writer handles it
