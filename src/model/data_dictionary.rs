@@ -142,8 +142,8 @@ impl DataDictionary {
             }
 
             // For non-mandatory fields, allow null values by using union types
-            if !will_be_required && !matches!(json_schema_type, "string" | "array" | "object") {
-                // Allow null for number, integer, boolean fields when not mandatory
+            if !will_be_required && !matches!(json_schema_type, "array" | "object") {
+                // Allow null for number, integer, boolean, string fields when not mandatory
                 property.insert("type".to_string(), json!([json_schema_type, "null"]));
             } else {
                 property.insert("type".to_string(), json!(json_schema_type));

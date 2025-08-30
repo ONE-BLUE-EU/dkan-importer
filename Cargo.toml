@@ -18,3 +18,4 @@ calamine = "0.30"  # Excel reader
 
 [dev-dependencies]
 tempfile = "3.21"
+proptest = "1.4"

@@ -20,7 +20,7 @@ fn test_datetime_with_dkan_format() {
 
     let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
     let props = &json_schema["properties"]["date_field"];
-    assert_eq!(props["type"], "string");
+    assert_eq!(props["type"], json!(["string", "null"])); // Now datetime fields get null union when optional
     assert_eq!(props["format"], "%Y/%m/%d");
     assert_eq!(props["dkan_format"], "%Y/%m/%d");
 }
@@ -42,7 +42,7 @@ fn test_datetime_with_default_format() {
 
     let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
     let props = &json_schema["properties"]["date_field"];
-    assert_eq!(props["type"], "string");
+    assert_eq!(props["type"], json!(["string", "null"])); // Now datetime fields get null union when optional
     assert_eq!(props["format"], "date-time");
     assert!(props.get("dkan_format").is_none());
 }

@@ -426,9 +426,9 @@ fn test_schema_generation_includes_null_types() {
         "Optional boolean field should allow null"
     );
 
-    // Check optional string field - should be just "string" (strings don't need null union)
+    // Check optional string field - should now be ["string", "null"] union (new behavior)
     let optional_string = properties.get("optional_string").unwrap();
-    assert_eq!(optional_string.get("type").unwrap(), &json!("string"));
+    assert_eq!(optional_string.get("type").unwrap(), &json!(["string", "null"]));
 
     // Check required fields list
     let required_fields = json_schema.get("required").unwrap().as_array().unwrap();
