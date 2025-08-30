@@ -123,7 +123,21 @@ impl DataDictionary {
                 _ => "string",
             };
 
-            property.insert("type".to_string(), json!(json_schema_type));
+            // Check if field will be required (we need to check this before adding to required_fields)
+            let mut will_be_required = false;
+            if let Some(constraints) = field.get("constraints") {
+                if let Some(required) = constraints.get("required") {
+                    will_be_required = required.as_bool().unwrap_or(false);
+                }
+            }
+
+            // For non-mandatory fields, allow null values by using union types
+            if !will_be_required && !matches!(json_schema_type, "string" | "array" | "object") {
+                // Allow null for number, integer, boolean fields when not mandatory
+                property.insert("type".to_string(), json!([json_schema_type, "null"]));
+            } else {
+                property.insert("type".to_string(), json!(json_schema_type));
+            }
 
             if let Some(title) = field_title {
                 property.insert("title".to_string(), json!(title));

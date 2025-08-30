@@ -90,11 +90,17 @@ fn test_dkan_schema_conversion_basic() {
 
     // Check properties
     let properties = &json_schema["properties"];
-    assert_eq!(properties["id"]["type"], "integer");
+
+    // id field is not mandatory (no required constraint), so it should allow null
+    assert_eq!(properties["id"]["type"], json!(["integer", "null"]));
+
+    // name field is mandatory (required: true), so it should be just string
     assert_eq!(properties["name"]["type"], "string");
     assert_eq!(properties["name"]["minLength"], 1);
     assert_eq!(properties["name"]["maxLength"], 100);
-    assert_eq!(properties["score"]["type"], "number");
+
+    // score field is not mandatory (no required constraint), so it should allow null
+    assert_eq!(properties["score"]["type"], json!(["number", "null"]));
     assert_eq!(properties["score"]["minimum"], 0.0);
     assert_eq!(properties["score"]["maximum"], 100.0);
 

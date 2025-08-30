@@ -89,7 +89,7 @@ pub struct FieldSchema {
 }
 
 pub struct ExcelValidator {
-    validator: Validator,
+    pub validator: Validator,
     field_schemas: HashMap<String, FieldSchema>,
     error_log: BufWriter<File>,
     pub validation_reports: Vec<ValidationReport>,
@@ -396,7 +396,22 @@ impl ExcelValidator {
         field_name: &str,
     ) -> Value {
         match cell {
-            Data::Empty => Value::Null,
+            Data::Empty => {
+                // Check if this field allows null values (for non-mandatory fields)
+                if let Some(field_schema) = self.field_schemas.get(field_name) {
+                    match &field_schema.field_type {
+                        SchemaType::Mixed(types) => {
+                            // If it's a union type that includes null, allow it
+                            if types.contains(&SchemaType::Null) {
+                                return Value::Null;
+                            }
+                        }
+                        SchemaType::Null => return Value::Null,
+                        _ => {}
+                    }
+                }
+                Value::Null
+            }
             Data::String(s) => self.convert_string_with_schema_intelligence(s, field_name),
             Data::Float(f) => self.convert_float_with_validation(*f),
             Data::Int(i) => json!(*i),
@@ -421,8 +436,15 @@ impl ExcelValidator {
         if trimmed.is_empty() {
             // Check if field expects null or empty string
             if let Some(field_schema) = self.field_schemas.get(field_name) {
-                if matches!(field_schema.field_type, SchemaType::Null) {
-                    return Value::Null;
+                match &field_schema.field_type {
+                    SchemaType::Null => return Value::Null,
+                    SchemaType::Mixed(types) => {
+                        // If it's a union type that includes null, prefer null for empty strings
+                        if types.contains(&SchemaType::Null) {
+                            return Value::Null;
+                        }
+                    }
+                    _ => {}
                 }
             }
             return Value::String(s.to_string());
