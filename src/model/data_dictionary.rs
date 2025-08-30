@@ -109,6 +109,15 @@ impl DataDictionary {
             let field_format = field.get("format").and_then(|f| f.as_str());
             let field_description = field.get("description").and_then(|d| d.as_str());
 
+            // Check if either name or title ends with asterisk (*) - preserve original values
+            let name_indicates_required = field_name.trim_end().ends_with('*');
+            let title_indicates_required = if let Some(title) = field_title {
+                title.trim_end().ends_with('*')
+            } else {
+                false
+            };
+            let asterisk_indicates_required = name_indicates_required || title_indicates_required;
+
             // Build JSON Schema property
             let mut property = serde_json::Map::new();
 
@@ -123,11 +132,12 @@ impl DataDictionary {
                 _ => "string",
             };
 
-            // Check if field will be required (we need to check this before adding to required_fields)
-            let mut will_be_required = false;
+            // Check if field will be required (check constraints and asterisk in name/title)
+            let mut will_be_required = asterisk_indicates_required; // Start with asterisk indication
             if let Some(constraints) = field.get("constraints") {
                 if let Some(required) = constraints.get("required") {
-                    will_be_required = required.as_bool().unwrap_or(false);
+                    // Explicit constraints combine with asterisk indication
+                    will_be_required = will_be_required || required.as_bool().unwrap_or(false);
                 }
             }
 
@@ -165,13 +175,14 @@ impl DataDictionary {
                 }
             }
 
+            // Add field to required list if it's marked as required (either by constraints or asterisk in title)
+            if will_be_required {
+                required_fields.push(field_name.to_string());
+            }
+
             // Add any additional constraints based on field properties
             if let Some(constraints) = field.get("constraints") {
-                if let Some(required) = constraints.get("required") {
-                    if required.as_bool().unwrap_or(false) {
-                        required_fields.push(field_name.to_string());
-                    }
-                }
+                // Note: required constraint is already handled above
 
                 if let Some(min_length) = constraints.get("minLength") {
                     if let Some(min_len) = min_length.as_u64() {
