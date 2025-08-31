@@ -7,6 +7,10 @@ use thiserror::Error;
 
 use crate::utils::{normalize_string, write_error_to_log};
 
+/// Default placeholder for numeric fields to hint DKAN about expected precision
+/// This will result in DECIMAL(18, 6) - 18 total digits with 6 decimal places
+const NUMERIC_PLACEHOLDER: &str = "000000000000.000000";
+
 /// Type alias for a parsed Excel row with row number and field data
 pub type ParsedExcelRow = (usize, Map<String, Value>);
 
@@ -92,11 +96,12 @@ pub struct FieldSchema {
 pub struct ExcelValidator {
     pub validator: Validator,
     field_schemas: HashMap<String, FieldSchema>,
+    title_to_name_mapping: HashMap<String, String>,
     pub validation_reports: Vec<ValidationReport>,
 }
 
 impl ExcelValidator {
-    pub fn new(schema: &Value) -> Result<Self> {
+    pub fn new(schema: &Value, title_to_name_mapping: HashMap<String, String>) -> Result<Self> {
         // Create validator from schema
         let validator = jsonschema::validator_for(schema)
             .map_err(|e| anyhow::anyhow!("Invalid JSON schema: {}", e))?;
@@ -107,6 +112,7 @@ impl ExcelValidator {
         Ok(ExcelValidator {
             validator,
             field_schemas,
+            title_to_name_mapping,
             validation_reports: Vec::new(),
         })
     }
@@ -385,8 +391,19 @@ impl ExcelValidator {
             .quote_style(csv::QuoteStyle::Necessary)
             .from_path(csv_path)?;
 
-        // Write headers - no manual escaping needed, csv writer handles it
-        wtr.write_record(&headers)?;
+        // Map Excel headers (titles) to dictionary names for CSV output
+        let csv_headers: Vec<String> = headers
+            .iter()
+            .map(|title| {
+                self.title_to_name_mapping
+                    .get(title)
+                    .cloned()
+                    .unwrap_or_else(|| title.clone())
+            })
+            .collect();
+
+        // Write headers using dictionary names - no manual escaping needed, csv writer handles it
+        wtr.write_record(&csv_headers)?;
 
         // Write data rows
         for (_row_number, json_obj) in parsed_rows {
@@ -399,7 +416,32 @@ impl ExcelValidator {
                         Value::String(s) => s.clone(),
                         Value::Number(n) => n.to_string(),
                         Value::Bool(b) => b.to_string(),
-                        Value::Null => String::new(),
+                        Value::Null => {
+                            // For numeric fields, use 0.0 instead of empty string to help DKAN type inference
+                            // Look up field schema using the original Excel header (title)
+                            if let Some(field_schema) = self.field_schemas.get(header) {
+                                match &field_schema.field_type {
+                                    SchemaType::Number => NUMERIC_PLACEHOLDER.to_string(),
+                                    SchemaType::Integer => "0".to_string(),
+                                    SchemaType::Mixed(types) => {
+                                        // For mixed types (like [Number, Null]), check if it contains Number or Integer
+                                        if types.iter().any(|t| matches!(t, SchemaType::Number)) {
+                                            NUMERIC_PLACEHOLDER.to_string()
+                                        } else if types
+                                            .iter()
+                                            .any(|t| matches!(t, SchemaType::Integer))
+                                        {
+                                            "0".to_string()
+                                        } else {
+                                            String::new()
+                                        }
+                                    }
+                                    _ => String::new(),
+                                }
+                            } else {
+                                String::new()
+                            }
+                        }
                         Value::Array(arr) => {
                             // Convert arrays to semicolon-separated strings (safer than commas)
                             arr.iter()

@@ -32,7 +32,8 @@ fn test_non_mandatory_string_fields_accept_null() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
 
     let properties = json_schema["properties"].as_object().unwrap();
     let required = json_schema["required"].as_array().unwrap();
@@ -79,8 +80,10 @@ fn test_string_null_validation_behavior() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     // Test 1: Valid data with null optional string fields
     let valid_data = json!({
@@ -182,7 +185,8 @@ fn test_mixed_field_types_with_null_handling() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
     let properties = json_schema["properties"].as_object().unwrap();
 
     // All optional fields should have union types with null (use title-based property names)
@@ -208,7 +212,8 @@ fn test_mixed_field_types_with_null_handling() {
     assert_eq!(properties["Required Category *"]["type"], json!("string"));
 
     // Test validation
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     let valid_data = json!({
         "Required ID": "ID123",
@@ -249,8 +254,10 @@ fn test_regression_filter_cutoff_scenario() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     // This scenario was failing before: optional string field with null value
     let test_data = json!({
@@ -294,8 +301,10 @@ fn test_excel_cell_conversion_for_string_fields() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     // Test empty cell conversion for optional string field
     let empty_cell = Data::Empty;
@@ -363,8 +372,8 @@ fn test_string_field_scenarios_comprehensive() {
             "fields": [field]
         });
 
-        let json_schema =
-            DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
+        let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
 
         let properties = json_schema
             .get("properties")
@@ -445,8 +454,8 @@ fn test_mixed_types_with_string_null_support() {
             }]
         });
 
-        let json_schema =
-            DataDictionary::convert_data_dictionary_to_json_schema(&required_schema).unwrap();
+        let normalized_schema = DataDictionary::normalize_field_data_for_tests(required_schema.clone()).unwrap();
+        let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
         let properties = json_schema["properties"].as_object().unwrap();
         assert_eq!(
             properties["Test Field"]["type"],
@@ -465,8 +474,8 @@ fn test_mixed_types_with_string_null_support() {
             }]
         });
 
-        let json_schema =
-            DataDictionary::convert_data_dictionary_to_json_schema(&optional_schema).unwrap();
+        let normalized_schema = DataDictionary::normalize_field_data_for_tests(optional_schema.clone()).unwrap();
+        let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
         let properties = json_schema["properties"].as_object().unwrap();
 
         if matches!(dkan_type, "array" | "object") {
@@ -528,7 +537,8 @@ fn test_comprehensive_string_scenarios() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
     let properties = json_schema["properties"].as_object().unwrap();
     let required = json_schema["required"].as_array().unwrap();
 
@@ -546,7 +556,8 @@ fn test_comprehensive_string_scenarios() {
     assert_eq!(properties["Notes"]["type"], json!(["string", "null"])); // Optional = union
 
     // Test validation scenarios
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     // Scenario 1: All fields provided
     let data1 = json!({

@@ -44,9 +44,11 @@ fn test_ammonium_null_value_acceptance() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
 
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     // Test the exact scenario that was failing before:
     // Row 2 with null Ammonium value (the original error message)
@@ -116,8 +118,10 @@ fn test_excel_cell_to_null_conversion() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     // Test empty Excel cell conversion for the Ammonium field
     let empty_cell = Data::Empty;

@@ -3,6 +3,8 @@ use dkan_importer::utils::normalize_string;
 use proptest::prelude::*;
 use serde_json::json;
 
+mod common;
+
 #[test]
 fn test_normalize_string_basic() {
     assert_eq!(normalize_string("Simple Header"), "Simple Header");
@@ -231,7 +233,8 @@ fn test_integration_with_schema_validation() -> anyhow::Result<()> {
         "additionalProperties": false
     });
 
-    let validator = ExcelValidator::new(&schema).unwrap();
+    let title_to_name_mapping = common::create_title_to_name_mapping_from_schema(&schema);
+    let validator = ExcelValidator::new(&schema, title_to_name_mapping).unwrap();
 
     // Test that normalized headers would create valid JSON
     let normalized_headers = vec![

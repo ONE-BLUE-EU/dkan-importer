@@ -21,7 +21,9 @@ fn test_title_used_as_property_name() {
         ]
     });
 
-    let schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_fields).unwrap();
+    let normalized_fields = DataDictionary::normalize_field_data_for_tests(dkan_fields).unwrap();
+    let schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_fields).unwrap();
     let properties = schema.get("properties").unwrap().as_object().unwrap();
 
     // Should use title as property name
@@ -51,7 +53,9 @@ fn test_asterisk_in_title_indicates_required() {
         ]
     });
 
-    let schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_fields).unwrap();
+    let normalized_fields = DataDictionary::normalize_field_data_for_tests(dkan_fields).unwrap();
+    let schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_fields).unwrap();
     let required = schema.get("required").unwrap().as_array().unwrap();
 
     // Only field with asterisk should be required
@@ -72,7 +76,9 @@ fn test_fallback_to_name_when_no_title() {
         ]
     });
 
-    let schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_fields).unwrap();
+    let normalized_fields = DataDictionary::normalize_field_data_for_tests(dkan_fields).unwrap();
+    let schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_fields).unwrap();
     let properties = schema.get("properties").unwrap().as_object().unwrap();
 
     // Should use field name as property name when title is missing
@@ -92,7 +98,9 @@ fn test_title_with_newlines_normalized() {
         ]
     });
 
-    let schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_fields).unwrap();
+    let normalized_fields = DataDictionary::normalize_field_data_for_tests(dkan_fields).unwrap();
+    let schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_fields).unwrap();
     let properties = schema.get("properties").unwrap().as_object().unwrap();
 
     // Should normalize title (replacing newlines with spaces)
@@ -117,7 +125,9 @@ fn test_mixed_title_and_no_title_fields() {
         ]
     });
 
-    let schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_fields).unwrap();
+    let normalized_fields = DataDictionary::normalize_field_data_for_tests(dkan_fields).unwrap();
+    let schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_fields).unwrap();
     let properties = schema.get("properties").unwrap().as_object().unwrap();
     let required = schema.get("required").unwrap().as_array().unwrap();
 

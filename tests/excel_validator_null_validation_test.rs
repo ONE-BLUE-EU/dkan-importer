@@ -31,9 +31,11 @@ fn test_null_accepted_for_non_mandatory_number_field() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
 
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     // Test data with null value for non-mandatory field (use title-based property names)
     let test_data = json!({
@@ -74,9 +76,11 @@ fn test_null_rejected_for_mandatory_number_field() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
 
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     // Test data with null value for mandatory field (use title-based property names)
     let test_data = json!({
@@ -134,8 +138,10 @@ fn test_empty_cell_conversion_for_non_mandatory_number() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     // Test empty cell conversion for different field types
     let empty_cell = Data::Empty;
@@ -193,8 +199,10 @@ fn test_empty_string_conversion_for_non_mandatory_number() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     // Test empty string conversion for non-mandatory number field
     // Use title-based property name
@@ -271,8 +279,10 @@ fn test_comprehensive_validation_scenario() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     // Test case 1: Valid data with some null optional fields (use title-based property names)
     let valid_data = json!({
@@ -354,7 +364,8 @@ fn test_schema_generation_includes_null_types() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
     let properties = json_schema.get("properties").unwrap().as_object().unwrap();
 
     // Check mandatory string field - should be just "string"

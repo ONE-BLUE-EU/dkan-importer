@@ -9,7 +9,8 @@ mod common;
 #[test]
 fn test_excel_validator_new_success() {
     let schema = common::create_test_schema();
-    let validator = ExcelValidator::new(&schema);
+    let title_to_name_mapping = common::create_title_to_name_mapping_from_schema(&schema);
+    let validator = ExcelValidator::new(&schema, title_to_name_mapping);
     assert!(validator.is_ok());
 }
 

@@ -30,7 +30,8 @@ fn test_asterisk_in_title_makes_field_required() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
 
     // Check required fields (should contain property names, which are titles)
     let required = json_schema.get("required").unwrap().as_array().unwrap();
@@ -105,7 +106,8 @@ fn test_asterisk_in_name_makes_field_required() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
 
     // Check required fields (property names should be titles, but since these have no titles, they use field names)
     let required = json_schema.get("required").unwrap().as_array().unwrap();
@@ -185,7 +187,8 @@ fn test_asterisk_in_both_name_and_title() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
 
     // All fields with asterisks (in either name or title) should be required
     // Property names are now titles, so required array contains titles
@@ -254,7 +257,8 @@ fn test_asterisk_with_explicit_constraints_preserved() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
 
     // Check required fields (should contain property names, which are titles)
     let required = json_schema.get("required").unwrap().as_array().unwrap();
@@ -336,7 +340,8 @@ fn test_asterisk_edge_cases_preserved() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
 
     let required = json_schema.get("required").unwrap().as_array().unwrap();
     let properties = json_schema.get("properties").unwrap().as_object().unwrap();
@@ -402,8 +407,10 @@ fn test_excel_matching_with_preserved_asterisks() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     // Test Excel data that matches the title-based property names
     let excel_data = json!({
@@ -475,7 +482,8 @@ fn test_type_handling_with_preserved_asterisks() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
     let properties = json_schema.get("properties").unwrap().as_object().unwrap();
 
     // Mandatory fields should have simple types (using title-based property names)
@@ -547,7 +555,8 @@ fn test_real_world_scenario_with_preservation() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
 
     // Verify required fields (should be 4: all with asterisks either in name or title)
     // Properties are now named after titles
@@ -594,7 +603,8 @@ fn test_real_world_scenario_with_preservation() {
     ); // Optional = union type
 
     // Test validation with realistic data
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
     let valid_data = json!({
         "Sample Identifier": "MARINE_001",         // Required field with asterisk in name
         "Collection Date *": "2024-01-15T10:30:00Z", // Required field with asterisk in title

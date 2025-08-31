@@ -24,8 +24,10 @@ fn test_additional_properties_error_message() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     // Test data with additional properties not in schema
     let test_data = json!({
@@ -101,8 +103,10 @@ fn test_type_mismatch_error_includes_actual_value() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     // Test data with type mismatches that should show actual values in error messages
     let test_data = json!({
@@ -165,8 +169,10 @@ fn test_validation_report_with_enhanced_errors() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     // Create test data with type mismatches
     let test_rows = vec![
@@ -205,8 +211,10 @@ fn test_specific_volume_error_enhancement() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     // Test with the exact scenario: providing a string where an integer is expected
     // Use title-based property name
@@ -264,8 +272,10 @@ fn test_error_message_format_comparison() {
         ]
     });
 
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let validator = ExcelValidator::new(&json_schema).unwrap();
+    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     let test_data = json!({"Volume (mL) *": "25.7"});
     let is_valid = validator.validator.is_valid(&test_data);

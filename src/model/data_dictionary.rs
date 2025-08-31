@@ -71,23 +71,42 @@ impl DataDictionary {
                 .and_then(|name| name.as_str())
                 .expect("Data dictionary title not found")
                 .to_string(),
-            fields: data.clone(),
+            fields: Self::normalize_field_data(data.clone())?,
             url: data_dictionary_url,
         });
     }
 
+    /// Normalize field names and titles in the data dictionary structure
+    /// This is done once during initialization to avoid repeated normalization
+    fn normalize_field_data(mut data: Value) -> Result<Value, anyhow::Error> {
+        if let Some(fields) = data.get_mut("fields").and_then(|f| f.as_array_mut()) {
+            for field in fields {
+                // Normalize field name if present
+                if let Some(name) = field.get("name").and_then(|n| n.as_str()) {
+                    let normalized_name = normalize_string(name);
+                    field["name"] = Value::String(normalized_name);
+                }
+
+                // Normalize field title if present
+                if let Some(title) = field.get("title").and_then(|t| t.as_str()) {
+                    let normalized_title = normalize_string(title);
+                    field["title"] = Value::String(normalized_title);
+                }
+            }
+        }
+        Ok(data)
+    }
+
     pub fn to_json_schema(&self) -> Result<Value, anyhow::Error> {
+        // Use optimized version since self.fields is already normalized
         Self::convert_data_dictionary_to_json_schema(&self.fields)
     }
 
-    /// Convert DKAN data dictionary fields to JSON Schema format
-    /// This is a static method that can be easily unit tested
+    /// Convert normalized data dictionary to JSON Schema (optimized version)
+    /// This assumes field names and titles are already normalized
     pub fn convert_data_dictionary_to_json_schema(
         dkan_fields: &Value,
     ) -> Result<Value, anyhow::Error> {
-        // Check for duplicate fields first
-        Self::check_duplicates(dkan_fields)?;
-
         let title = dkan_fields
             .get("title")
             .and_then(|t| t.as_str())
@@ -108,30 +127,21 @@ impl DataDictionary {
                 .ok_or_else(|| anyhow::anyhow!("Field name not found"))?;
             let field_title = field.get("title").and_then(|t| t.as_str());
 
-            // Normalize name and title fields to handle control characters and whitespace
-            let normalized_field_name = normalize_string(field_name);
-            let normalized_field_title = field_title.map(normalize_string);
+            // Fields are already normalized - no need to normalize again
+            let normalized_field_name = field_name;
+            let normalized_field_title = field_title;
 
             let field_type = field
                 .get("type")
                 .and_then(|t| t.as_str())
-                .unwrap_or("string");
-            let field_format = field.get("format").and_then(|f| f.as_str());
-            let field_description = field.get("description").and_then(|d| d.as_str());
+                .ok_or_else(|| anyhow::anyhow!("Field type not found"))?;
 
-            // Use normalized title as JSON Schema property name if available, otherwise fall back to normalized name
-            let schema_property_name = normalized_field_title
-                .as_deref()
-                .unwrap_or(&normalized_field_name);
-
-            // Check if either normalized name or title ends with asterisk (*)
-            let name_indicates_required = normalized_field_name.trim_end().ends_with('*');
-            let title_indicates_required = if let Some(ref title) = normalized_field_title {
-                title.trim_end().ends_with('*')
+            // Use the normalized title as the schema property name, fallback to normalized name
+            let schema_property_name = if let Some(title) = normalized_field_title {
+                title
             } else {
-                false
+                normalized_field_name
             };
-            let asterisk_indicates_required = name_indicates_required || title_indicates_required;
 
             // Build JSON Schema property
             let mut property = serde_json::Map::new();
@@ -148,6 +158,15 @@ impl DataDictionary {
             };
 
             // Check if field will be required (check constraints and asterisk in name/title)
+            let name_indicates_required = normalized_field_name.trim_end().ends_with('*');
+            let title_indicates_required = if let Some(title) = normalized_field_title {
+                title.trim_end().ends_with('*')
+            } else {
+                false
+            };
+            let asterisk_indicates_required = name_indicates_required || title_indicates_required;
+
+            // Check constraints for required field indication
             let mut will_be_required = asterisk_indicates_required; // Start with asterisk indication
             if let Some(constraints) = field.get("constraints") {
                 if let Some(required) = constraints.get("required") {
@@ -164,17 +183,17 @@ impl DataDictionary {
                 property.insert("type".to_string(), json!(json_schema_type));
             }
 
-            if let Some(ref title) = normalized_field_title {
+            if let Some(title) = normalized_field_title {
                 property.insert("title".to_string(), json!(title));
             }
 
-            if let Some(description) = field_description {
+            if let Some(description) = field.get("description").and_then(|d| d.as_str()) {
                 property.insert("description".to_string(), json!(description));
             }
 
             // Special handling for datetime
             if field_type == "datetime" {
-                if let Some(format) = field_format {
+                if let Some(format) = field.get("format").and_then(|f| f.as_str()) {
                     if format != "default" && !format.is_empty() {
                         property.insert("format".to_string(), json!(format));
                         property.insert("dkan_format".to_string(), json!(format));
@@ -184,7 +203,7 @@ impl DataDictionary {
                 } else {
                     property.insert("format".to_string(), json!("date-time"));
                 }
-            } else if let Some(format) = field_format {
+            } else if let Some(format) = field.get("format").and_then(|f| f.as_str()) {
                 if format != "default" && !format.is_empty() {
                     property.insert("format".to_string(), json!(format));
                 }
@@ -234,6 +253,42 @@ impl DataDictionary {
                 }
             }
 
+            // Add default decimal constraints for numeric fields to prevent SQL syntax errors
+            match json_schema_type {
+                "number" => {
+                    // Add default decimal precision and scale if not already specified
+                    if !property.contains_key("decimalPlaces")
+                        && !property.contains_key("precision")
+                    {
+                        // Set reasonable default precision for scientific data
+                        property.insert("decimalPlaces".to_string(), json!(12)); // 12 decimal places for scientific precision
+                        property.insert("precision".to_string(), json!(20)); // 20 total digits
+                    }
+
+                    // Ensure minimum/maximum are reasonable if not set
+                    if !property.contains_key("minimum") {
+                        property.insert("minimum".to_string(), json!(-999999999.0));
+                        // Reasonable min
+                    }
+                    if !property.contains_key("maximum") {
+                        property.insert("maximum".to_string(), json!(999999999.0));
+                        // Reasonable max
+                    }
+                }
+                "integer" => {
+                    // Ensure integer fields have reasonable bounds if not set
+                    if !property.contains_key("minimum") {
+                        property.insert("minimum".to_string(), json!(-2147483648));
+                        // 32-bit int min
+                    }
+                    if !property.contains_key("maximum") {
+                        property.insert("maximum".to_string(), json!(2147483647));
+                        // 32-bit int max
+                    }
+                }
+                _ => {} // No special handling for other types
+            }
+
             properties.insert(schema_property_name.to_string(), Value::Object(property));
         }
 
@@ -255,6 +310,77 @@ impl DataDictionary {
         json_schema.insert("additionalProperties".to_string(), json!(false));
 
         return Ok(Value::Object(json_schema));
+    }
+
+    /// Create a mapping from normalized field titles to normalized field names
+    /// This is used for CSV export where we want to use machine names as column headers
+    /// while still using titles for Excel header matching
+    pub fn get_title_to_name_mapping(&self) -> Result<HashMap<String, String>, anyhow::Error> {
+        let fields = self
+            .fields
+            .get("fields")
+            .and_then(|f| f.as_array())
+            .ok_or_else(|| anyhow::anyhow!("Fields array not found in schema"))?;
+
+        let mut title_to_name_map = HashMap::new();
+
+        for field in fields {
+            let field_name = field
+                .get("name")
+                .and_then(|n| n.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Field name not found"))?;
+            let field_title = field.get("title").and_then(|t| t.as_str());
+
+            // Fields are already normalized during initialization - no need to normalize again
+            if let Some(title) = field_title {
+                title_to_name_map.insert(title.to_string(), field_name.to_string());
+            } else {
+                title_to_name_map.insert(field_name.to_string(), field_name.to_string());
+            }
+        }
+
+        Ok(title_to_name_map)
+    }
+
+    /// Create a mapping from normalized field titles to normalized field names
+    /// This is a static method that can be easily unit tested
+    pub fn create_title_to_name_mapping(
+        dkan_fields: &Value,
+    ) -> Result<HashMap<String, String>, anyhow::Error> {
+        let fields = dkan_fields
+            .get("fields")
+            .and_then(|f| f.as_array())
+            .ok_or_else(|| anyhow::anyhow!("Fields array not found in schema"))?;
+
+        let mut title_to_name_map = HashMap::new();
+
+        for field in fields {
+            let field_name = field
+                .get("name")
+                .and_then(|n| n.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Field name not found"))?;
+            let field_title = field.get("title").and_then(|t| t.as_str());
+
+            // Normalize name and title fields to handle control characters and whitespace
+            let normalized_field_name = normalize_string(field_name);
+            let normalized_field_title = field_title.map(normalize_string);
+
+            // Map normalized title to normalized name
+            // If title exists, use it as the key; otherwise use name as both key and value
+            if let Some(ref title) = normalized_field_title {
+                title_to_name_map.insert(title.clone(), normalized_field_name.clone());
+            } else {
+                title_to_name_map.insert(normalized_field_name.clone(), normalized_field_name);
+            }
+        }
+
+        Ok(title_to_name_map)
+    }
+
+    /// Helper function to normalize field data for testing purposes
+    /// This is used by tests that work with raw DKAN data
+    pub fn normalize_field_data_for_tests(data: Value) -> Result<Value, anyhow::Error> {
+        Self::normalize_field_data(data)
     }
 
     /// Check for duplicate field names and titles in a data dictionary
