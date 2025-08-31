@@ -1,172 +1,150 @@
 use dkan_importer::model::ExcelValidator;
+use dkan_importer::utils::normalize_string;
 use proptest::prelude::*;
 use serde_json::json;
 
 #[test]
-fn test_normalize_excel_header_basic() {
-    assert_eq!(
-        ExcelValidator::normalize_excel_header("Simple Header".to_string()),
-        "Simple Header"
-    );
+fn test_normalize_string_basic() {
+    assert_eq!(normalize_string("Simple Header"), "Simple Header");
 }
 
 #[test]
-fn test_normalize_excel_header_multiple_spaces() {
+fn test_normalize_string_multiple_spaces() {
     // Test that multiple consecutive spaces are collapsed into single spaces
     assert_eq!(
-        ExcelValidator::normalize_excel_header("Header  with   multiple    spaces".to_string()),
+        normalize_string("Header  with   multiple    spaces"),
         "Header with multiple spaces"
     );
 
     // Test leading and trailing spaces are trimmed
     assert_eq!(
-        ExcelValidator::normalize_excel_header("   Leading and trailing spaces   ".to_string()),
+        normalize_string("   Leading and trailing spaces   "),
         "Leading and trailing spaces"
     );
 
     // Test mixture of spaces, tabs, and newlines - all normalized to single spaces
     assert_eq!(
-        ExcelValidator::normalize_excel_header("Mixed   \t\n  whitespace   characters".to_string()),
+        normalize_string("Mixed   \t\n  whitespace   characters"),
         "Mixed whitespace characters"
     );
 
     // Test extreme case with many spaces
     assert_eq!(
-        ExcelValidator::normalize_excel_header(
-            "Too      many          spaces      here".to_string()
-        ),
+        normalize_string("Too      many          spaces      here"),
         "Too many spaces here"
     );
 
     // Test with asterisks and multiple spaces
     assert_eq!(
-        ExcelValidator::normalize_excel_header("Required   Field*   with    spaces*".to_string()),
+        normalize_string("Required   Field*   with    spaces*"),
         "Required Field* with spaces*"
     );
 
     // Test empty string with spaces
-    assert_eq!(
-        ExcelValidator::normalize_excel_header("   ".to_string()),
-        ""
-    );
+    assert_eq!(normalize_string("   "), "");
 
     // Test single space (should remain unchanged)
-    assert_eq!(ExcelValidator::normalize_excel_header(" ".to_string()), "");
+    assert_eq!(normalize_string(" "), "");
 }
 
 #[test]
-fn test_normalize_excel_header_preserves_asterisks() {
-    assert_eq!(
-        ExcelValidator::normalize_excel_header("Required Field*".to_string()),
-        "Required Field*"
-    );
+fn test_normalize_string_preserves_asterisks() {
+    assert_eq!(normalize_string("Required Field*"), "Required Field*");
 
     assert_eq!(
-        ExcelValidator::normalize_excel_header("Multiple Asterisks***".to_string()),
+        normalize_string("Multiple Asterisks***"),
         "Multiple Asterisks***"
     );
 }
 
 #[test]
-fn test_normalize_excel_header_with_newlines() {
+fn test_normalize_string_with_newlines() {
     assert_eq!(
-        ExcelValidator::normalize_excel_header("Remark 1\nAnalytical Partner".to_string()),
+        normalize_string("Remark 1\nAnalytical Partner"),
         "Remark 1 Analytical Partner"
     );
 
     assert_eq!(
-        ExcelValidator::normalize_excel_header("First Line\nSecond Line\nThird Line".to_string()),
+        normalize_string("First Line\nSecond Line\nThird Line"),
         "First Line Second Line Third Line"
     );
 }
 
 #[test]
-fn test_normalize_excel_header_with_control_characters() {
-    assert_eq!(
-        ExcelValidator::normalize_excel_header("Header\tWith\tTabs".to_string()),
-        "Header With Tabs"
-    );
+fn test_normalize_string_with_control_characters() {
+    assert_eq!(normalize_string("Header\tWith\tTabs"), "Header With Tabs");
 
     assert_eq!(
-        ExcelValidator::normalize_excel_header("Header\rWith\rCarriage".to_string()),
+        normalize_string("Header\rWith\rCarriage"),
         "Header With Carriage"
     );
 }
 
 #[test]
-fn test_normalize_excel_header_complex() {
+fn test_normalize_string_complex() {
     assert_eq!(
-        ExcelValidator::normalize_excel_header(
-            "  \tComplicated *\nWith Everything\r  ".to_string()
-        ),
+        normalize_string("  \tComplicated *\nWith Everything\r  "),
         "Complicated * With Everything"
     );
 }
 
 #[test]
-fn test_normalize_excel_header_edge_cases() {
+fn test_normalize_string_edge_cases() {
     // Empty string
-    assert_eq!(ExcelValidator::normalize_excel_header("".to_string()), "");
+    assert_eq!(normalize_string(""), "");
 
     // Only asterisks - now preserved
-    assert_eq!(
-        ExcelValidator::normalize_excel_header("***".to_string()),
-        "***"
-    );
+    assert_eq!(normalize_string("***"), "***");
 
     // Only whitespace and control characters
-    assert_eq!(
-        ExcelValidator::normalize_excel_header("  \t\r\n  ".to_string()),
-        ""
-    );
+    assert_eq!(normalize_string("  \t\r\n  "), "");
 
     // Just newline
-    assert_eq!(ExcelValidator::normalize_excel_header("\n".to_string()), "");
+    assert_eq!(normalize_string("\n"), "");
 }
 
 #[test]
-fn test_normalize_excel_header_preserves_internal_asterisks() {
+fn test_normalize_string_preserves_internal_asterisks() {
     assert_eq!(
-        ExcelValidator::normalize_excel_header("Field * With Internal".to_string()),
+        normalize_string("Field * With Internal"),
         "Field * With Internal"
     );
 }
 
 #[test]
-fn test_normalize_excel_header_real_world_examples() {
+fn test_normalize_string_real_world_examples() {
     // From the original error message - asterisks now preserved
     assert_eq!(
-        ExcelValidator::normalize_excel_header("Date of sampling start*".to_string()),
+        normalize_string("Date of sampling start*"),
         "Date of sampling start*"
     );
 
-    assert_eq!(
-        ExcelValidator::normalize_excel_header("Name of sea*".to_string()),
-        "Name of sea*"
-    );
+    assert_eq!(normalize_string("Name of sea*"), "Name of sea*");
 
     assert_eq!(
-        ExcelValidator::normalize_excel_header("Remark 1\nAnalytical Partner".to_string()),
+        normalize_string("Remark 1\nAnalytical Partner"),
         "Remark 1 Analytical Partner"
     );
 
     assert_eq!(
-        ExcelValidator::normalize_excel_header(
-            "Remark 2\nDissolved Oxygen Concentration (mg/kg)".to_string()
-        ),
+        normalize_string("Remark 2\nDissolved Oxygen Concentration (mg/kg)"),
         "Remark 2 Dissolved Oxygen Concentration (mg/kg)"
     );
 }
 
 // Property-based tests using proptest
 proptest! {
+     #![proptest_config(ProptestConfig {
+        cases: 10000, ..ProptestConfig::default()
+        })]
+
     #[test]
-    fn test_normalize_excel_header_preserves_trailing_asterisks(
+    fn test_normalize_string_preserves_trailing_asterisks(
         base in "[a-zA-Z0-9 ]+",
         asterisks in "\\*+"
     ) {
         let input = format!("{}{}", base, asterisks);
-        let result = ExcelValidator::normalize_excel_header(input);
+        let result = normalize_string(&input);
 
         // Result should preserve asterisks
         prop_assert!(result.ends_with(&asterisks));
@@ -178,12 +156,12 @@ proptest! {
     }
 
     #[test]
-    fn test_normalize_excel_header_preserves_all_text_with_spaces(
+    fn test_normalize_string_preserves_all_text_with_spaces(
         first_line in "[a-zA-Z0-9 *]+",
         second_line in "[a-zA-Z0-9 *]+"
     ) {
         let input = format!("{}\n{}", first_line, second_line);
-        let result = ExcelValidator::normalize_excel_header(input);
+        let result = normalize_string(&input);
 
         // Result should contain both lines separated by space, with normalized whitespace
         let normalized_first = first_line.split_whitespace().collect::<Vec<&str>>().join(" ");
@@ -203,7 +181,7 @@ proptest! {
     }
 
     #[test]
-    fn test_normalize_excel_header_replaces_control_chars_with_spaces(
+    fn test_normalize_string_replaces_control_chars_with_spaces(
         prefix in "[a-zA-Z0-9 ]*",
         suffix in "[a-zA-Z0-9 ]*"
     ) {
@@ -212,7 +190,7 @@ proptest! {
 
         for &ctrl in &control_chars {
             let input = format!("{}{}{}", prefix, ctrl, suffix);
-            let result = ExcelValidator::normalize_excel_header(input);
+            let result = normalize_string(&input);
 
             // Result should not contain the control character
             prop_assert!(!result.contains(ctrl));
@@ -228,11 +206,11 @@ proptest! {
     }
 
     #[test]
-    fn test_normalize_excel_header_idempotent(
+    fn test_normalize_string_idempotent(
         input in "[a-zA-Z0-9 ]+[*]*"
     ) {
-        let first_pass = ExcelValidator::normalize_excel_header(input);
-        let second_pass = ExcelValidator::normalize_excel_header(first_pass.clone());
+        let first_pass = normalize_string(&input);
+        let second_pass = normalize_string(&first_pass);
 
         // Normalizing twice should give same result
         prop_assert_eq!(first_pass, second_pass);
@@ -257,9 +235,9 @@ fn test_integration_with_schema_validation() -> anyhow::Result<()> {
 
     // Test that normalized headers would create valid JSON
     let normalized_headers = vec![
-        ExcelValidator::normalize_excel_header("Date of sampling start*".to_string()),
-        ExcelValidator::normalize_excel_header("Name of sea*".to_string()),
-        ExcelValidator::normalize_excel_header("Remark 1\nAnalytical Partner".to_string()),
+        normalize_string("Date of sampling start*"),
+        normalize_string("Name of sea*"),
+        normalize_string("Remark 1\nAnalytical Partner"),
     ];
 
     // Create JSON object using normalized headers

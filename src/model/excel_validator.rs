@@ -7,6 +7,8 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use thiserror::Error;
 
+use crate::utils::normalize_string;
+
 /// Type alias for a parsed Excel row with row number and field data
 pub type ParsedExcelRow = (usize, Map<String, Value>);
 
@@ -128,26 +130,6 @@ impl ExcelValidator {
         Ok(field_schemas)
     }
 
-    /// Normalize Excel header to match DKAN dictionary titles
-    /// Replaces newlines and control characters with spaces (but keeps asterisks and full text)
-    pub fn normalize_excel_header(raw_header: String) -> String {
-        raw_header
-            .chars() // Process character by character
-            .map(|c| {
-                if c.is_control() {
-                    ' ' // Replace control characters (newlines, tabs, etc.) with spaces
-                } else {
-                    c // Keep all other characters including asterisks
-                }
-            })
-            .collect::<String>()
-            .split_whitespace() // Split on whitespace to normalize multiple spaces
-            .collect::<Vec<&str>>()
-            .join(" ") // Join back with single spaces
-            .trim() // Remove leading/trailing whitespace
-            .to_string()
-    }
-
     /// Parse individual field schema into our FieldSchema structure
     fn parse_field_schema(schema: &Value) -> Result<FieldSchema> {
         let field_type = Self::parse_schema_type(schema)?;
@@ -263,7 +245,7 @@ impl ExcelValidator {
                 // First row contains headers - normalize them to match DKAN titles
                 headers = row
                     .iter()
-                    .map(|cell| Self::normalize_excel_header(cell.to_string()))
+                    .map(|cell| normalize_string(&cell.to_string()))
                     .collect();
                 continue;
             }

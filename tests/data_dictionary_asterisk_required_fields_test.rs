@@ -345,11 +345,11 @@ fn test_asterisk_edge_cases_preserved() {
     assert!(required.contains(&json!("Multiple ***")));
     assert_eq!(properties["Multiple ***"]["title"], json!("Multiple ***"));
 
-    // Space after asterisk should work (using title as property name)
-    assert!(required.contains(&json!("Spaces Before * ")));
+    // Space after asterisk should work (using title as property name, after normalization trailing spaces are trimmed)
+    assert!(required.contains(&json!("Spaces Before *")));
     assert_eq!(
-        properties["Spaces Before * "]["title"],
-        json!("Spaces Before * ")
+        properties["Spaces Before *"]["title"],
+        json!("Spaces Before *")
     );
 
     // Asterisk not at end should NOT make field mandatory (property name is title)

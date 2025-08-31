@@ -1,3 +1,4 @@
+use crate::utils::normalize_string;
 use reqwest::blocking::Client;
 use serde_json::{json, Value};
 
@@ -102,6 +103,11 @@ impl DataDictionary {
                 .and_then(|n| n.as_str())
                 .ok_or_else(|| anyhow::anyhow!("Field name not found"))?;
             let field_title = field.get("title").and_then(|t| t.as_str());
+
+            // Normalize name and title fields to handle control characters and whitespace
+            let normalized_field_name = normalize_string(field_name);
+            let normalized_field_title = field_title.map(|t| normalize_string(t));
+
             let field_type = field
                 .get("type")
                 .and_then(|t| t.as_str())
@@ -109,12 +115,14 @@ impl DataDictionary {
             let field_format = field.get("format").and_then(|f| f.as_str());
             let field_description = field.get("description").and_then(|d| d.as_str());
 
-            // Use title as JSON Schema property name if available, otherwise fall back to name
-            let schema_property_name = field_title.unwrap_or(field_name);
+            // Use normalized title as JSON Schema property name if available, otherwise fall back to normalized name
+            let schema_property_name = normalized_field_title
+                .as_deref()
+                .unwrap_or(&normalized_field_name);
 
-            // Check if either name or title ends with asterisk (*) - preserve original values
-            let name_indicates_required = field_name.trim_end().ends_with('*');
-            let title_indicates_required = if let Some(title) = field_title {
+            // Check if either normalized name or title ends with asterisk (*)
+            let name_indicates_required = normalized_field_name.trim_end().ends_with('*');
+            let title_indicates_required = if let Some(ref title) = normalized_field_title {
                 title.trim_end().ends_with('*')
             } else {
                 false
@@ -152,7 +160,7 @@ impl DataDictionary {
                 property.insert("type".to_string(), json!(json_schema_type));
             }
 
-            if let Some(title) = field_title {
+            if let Some(ref title) = normalized_field_title {
                 property.insert("title".to_string(), json!(title));
             }
 

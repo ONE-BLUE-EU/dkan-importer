@@ -80,7 +80,7 @@ fn test_fallback_to_name_when_no_title() {
 }
 
 #[test]
-fn test_title_with_newlines_preserved() {
+fn test_title_with_newlines_normalized() {
     let dkan_fields = json!({
         "title": "Test Schema",
         "fields": [
@@ -95,8 +95,8 @@ fn test_title_with_newlines_preserved() {
     let schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_fields).unwrap();
     let properties = schema.get("properties").unwrap().as_object().unwrap();
 
-    // Should preserve full title including newlines
-    assert!(properties.contains_key("Remark 1\nAnalytical Partner"));
+    // Should normalize title (replacing newlines with spaces)
+    assert!(properties.contains_key("Remark 1 Analytical Partner"));
     assert!(!properties.contains_key("remark_1"));
 }
 

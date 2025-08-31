@@ -1,5 +1,25 @@
 use chrono::prelude::*;
 
+/// Normalize text by replacing control characters with spaces and normalizing whitespace
+/// Replaces newlines and control characters with spaces (but keeps asterisks and full text)
+pub fn normalize_string(value: &str) -> String {
+    value
+        .chars() // Process character by character
+        .map(|c| {
+            if c.is_control() {
+                ' ' // Replace control characters (newlines, tabs, etc.) with spaces
+            } else {
+                c // Keep all other characters including asterisks
+            }
+        })
+        .collect::<String>()
+        .split_whitespace() // Split on whitespace to normalize multiple spaces
+        .collect::<Vec<&str>>()
+        .join(" ") // Join back with single spaces
+        .trim() // Remove leading/trailing whitespace
+        .to_string()
+}
+
 pub fn generate_unique_filename(dataset_id: &str, data_dictionary_id: &str) -> String {
     let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
     let filename = format!("{dataset_id}_{data_dictionary_id}_{timestamp}.csv");

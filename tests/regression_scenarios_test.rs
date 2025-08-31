@@ -93,8 +93,6 @@ fn test_ammonium_null_value_acceptance() {
         is_valid_with_value,
         "Row with actual Ammonium value should be valid"
     );
-
-
 }
 
 #[test]
@@ -146,6 +144,4 @@ fn test_excel_cell_to_null_conversion() {
         serde_json::Value::Null,
         "Empty string should be converted to null for non-mandatory Ammonium field"
     );
-
-
 }
