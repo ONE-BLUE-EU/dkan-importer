@@ -117,7 +117,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &client,
     )?;
 
-    let previous_csv_filename = dataset_add_distribution(
+    let optional_previous_csv_filename = dataset_add_distribution(
         &arguments.base_url,
         &arguments.dataset_id,
         &csv_filename,
@@ -129,10 +129,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     // Clean up previous CSV file if one was replaced
-    if let Some(prev_filename) = previous_csv_filename {
+    if let Some(previous_csv_filename) = optional_previous_csv_filename {
         delete_remote_file(
             &arguments.base_url,
-            &prev_filename,
+            &previous_csv_filename,
             &arguments.username,
             &password,
             &client,
