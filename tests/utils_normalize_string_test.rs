@@ -231,7 +231,7 @@ fn test_integration_with_schema_validation() -> anyhow::Result<()> {
         "additionalProperties": false
     });
 
-    let validator = ExcelValidator::new(&schema, "test_errors.log")?;
+    let validator = ExcelValidator::new(&schema).unwrap();
 
     // Test that normalized headers would create valid JSON
     let normalized_headers = vec![

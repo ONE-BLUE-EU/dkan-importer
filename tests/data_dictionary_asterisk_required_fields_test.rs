@@ -403,9 +403,7 @@ fn test_excel_matching_with_preserved_asterisks() {
     });
 
     let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let error_log_file = common::create_test_error_log_file();
-    let validator =
-        ExcelValidator::new(&json_schema, error_log_file.path().to_str().unwrap()).unwrap();
+    let validator = ExcelValidator::new(&json_schema).unwrap();
 
     // Test Excel data that matches the title-based property names
     let excel_data = json!({
@@ -596,10 +594,7 @@ fn test_real_world_scenario_with_preservation() {
     ); // Optional = union type
 
     // Test validation with realistic data
-    let error_log_file = common::create_test_error_log_file();
-    let validator =
-        ExcelValidator::new(&json_schema, error_log_file.path().to_str().unwrap()).unwrap();
-
+    let validator = ExcelValidator::new(&json_schema).unwrap();
     let valid_data = json!({
         "Sample Identifier": "MARINE_001",         // Required field with asterisk in name
         "Collection Date *": "2024-01-15T10:30:00Z", // Required field with asterisk in title

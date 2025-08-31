@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data_dictionary =
         DataDictionary::new(&arguments.base_url, &arguments.data_dictionary_id, &client)?;
     let json_schema = data_dictionary.to_json_schema()?;
-    let mut validator = ExcelValidator::new(&json_schema, ERRORS_LOG_FILE)?;
+    let mut validator = ExcelValidator::new(&json_schema)?;
     match validator.validate_excel(&arguments.excel_file, arguments.sheet_name.as_deref()) {
         Ok(_) => {
             if validator.validation_reports.is_empty() {
@@ -82,13 +82,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "❌ Validation failed with {} errors",
                     validator.validation_reports.len()
                 );
-                eprintln!("❌ Check errors.log for details.");
+                eprintln!("❌ Check {} for details.", ERRORS_LOG_FILE);
                 std::process::exit(1);
             }
         }
         Err(e) => {
             eprintln!("❌ Validation failed with error: {e}");
-            eprintln!("❌ Check errors.log for details.");
+            eprintln!("❌ Check {} for details.", ERRORS_LOG_FILE);
             std::process::exit(1);
         }
     }

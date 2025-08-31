@@ -33,9 +33,7 @@ fn test_null_accepted_for_non_mandatory_number_field() {
 
     let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
 
-    let error_log_file = common::create_test_error_log_file();
-    let validator =
-        ExcelValidator::new(&json_schema, error_log_file.path().to_str().unwrap()).unwrap();
+    let validator = ExcelValidator::new(&json_schema).unwrap();
 
     // Test data with null value for non-mandatory field (use title-based property names)
     let test_data = json!({
@@ -78,9 +76,7 @@ fn test_null_rejected_for_mandatory_number_field() {
 
     let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
 
-    let error_log_file = common::create_test_error_log_file();
-    let validator =
-        ExcelValidator::new(&json_schema, error_log_file.path().to_str().unwrap()).unwrap();
+    let validator = ExcelValidator::new(&json_schema).unwrap();
 
     // Test data with null value for mandatory field (use title-based property names)
     let test_data = json!({
@@ -139,9 +135,7 @@ fn test_empty_cell_conversion_for_non_mandatory_number() {
     });
 
     let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let error_log_file = common::create_test_error_log_file();
-    let validator =
-        ExcelValidator::new(&json_schema, error_log_file.path().to_str().unwrap()).unwrap();
+    let validator = ExcelValidator::new(&json_schema).unwrap();
 
     // Test empty cell conversion for different field types
     let empty_cell = Data::Empty;
@@ -200,9 +194,7 @@ fn test_empty_string_conversion_for_non_mandatory_number() {
     });
 
     let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let error_log_file = common::create_test_error_log_file();
-    let validator =
-        ExcelValidator::new(&json_schema, error_log_file.path().to_str().unwrap()).unwrap();
+    let validator = ExcelValidator::new(&json_schema).unwrap();
 
     // Test empty string conversion for non-mandatory number field
     // Use title-based property name
@@ -280,10 +272,7 @@ fn test_comprehensive_validation_scenario() {
     });
 
     let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-
-    let error_log_file = common::create_test_error_log_file();
-    let validator =
-        ExcelValidator::new(&json_schema, error_log_file.path().to_str().unwrap()).unwrap();
+    let validator = ExcelValidator::new(&json_schema).unwrap();
 
     // Test case 1: Valid data with some null optional fields (use title-based property names)
     let valid_data = json!({

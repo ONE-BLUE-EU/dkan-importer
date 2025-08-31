@@ -1,10 +1,5 @@
 use dkan_importer::model::ExcelValidator;
 use serde_json::{json, Value};
-use tempfile::NamedTempFile;
-
-fn create_test_error_log_file() -> NamedTempFile {
-    NamedTempFile::new().unwrap()
-}
 
 fn create_test_schema() -> Value {
     json!({
@@ -48,11 +43,7 @@ fn test_convert_datetime_with_schema_intelligence() {
     // We can test this method by verifying it correctly formats datetime strings
     // based on schema field formats, even without direct ExcelDateTime instances
 
-    let _validator = ExcelValidator::new(
-        &create_test_schema(),
-        create_test_error_log_file().path().to_str().unwrap(),
-    )
-    .unwrap();
+    let _validator = ExcelValidator::new(&create_test_schema()).unwrap();
 
     // Test with a custom schema that has specific datetime formatting
     let custom_schema = json!({
@@ -69,11 +60,7 @@ fn test_convert_datetime_with_schema_intelligence() {
         }
     });
 
-    let custom_validator = ExcelValidator::new(
-        &custom_schema,
-        create_test_error_log_file().path().to_str().unwrap(),
-    )
-    .unwrap();
+    let custom_validator = ExcelValidator::new(&custom_schema).unwrap();
 
     // Test that the method would format dates according to schema format
     // We can verify this logic works by testing the string conversion method
@@ -91,11 +78,7 @@ fn test_convert_datetime_with_schema_intelligence() {
 
 #[test]
 fn test_convert_datetime_string_with_schema_intelligence() {
-    let validator = ExcelValidator::new(
-        &create_test_schema(),
-        create_test_error_log_file().path().to_str().unwrap(),
-    )
-    .unwrap();
+    let validator = ExcelValidator::new(&create_test_schema()).unwrap();
 
     // Test date field
     let value =
@@ -110,11 +93,7 @@ fn test_convert_datetime_string_with_schema_intelligence() {
 
 #[test]
 fn test_looks_like_date() {
-    let validator = ExcelValidator::new(
-        &create_test_schema(),
-        create_test_error_log_file().path().to_str().unwrap(),
-    )
-    .unwrap();
+    let validator = ExcelValidator::new(&create_test_schema()).unwrap();
 
     // Test various date formats
     assert!(validator.looks_like_date("2024-09-15"));

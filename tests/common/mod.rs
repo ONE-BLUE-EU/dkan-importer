@@ -2,7 +2,6 @@
 
 use dkan_importer::model::ExcelValidator;
 use serde_json::{json, Value};
-use tempfile::NamedTempFile;
 
 /// Creates a basic test schema for testing purposes
 #[allow(dead_code)]
@@ -37,23 +36,16 @@ pub fn create_test_schema() -> Value {
     })
 }
 
-/// Creates a temporary error log file for testing
-pub fn create_test_error_log_file() -> NamedTempFile {
-    NamedTempFile::new().expect("Failed to create temp error log file")
-}
-
 /// Creates a test validator with the default test schema
 #[allow(dead_code)]
 pub fn create_test_validator() -> ExcelValidator {
     let schema = create_test_schema();
-    let error_log_file = create_test_error_log_file();
-    ExcelValidator::new(&schema, error_log_file.path().to_str().unwrap()).unwrap()
+    ExcelValidator::new(&schema).unwrap()
 }
 
 // Creates a test validator with a custom schema
 // It is used in tests that need a custom schema
 #[allow(dead_code)]
 pub fn create_test_validator_with_schema(schema: &Value) -> ExcelValidator {
-    let error_log_file = create_test_error_log_file();
-    ExcelValidator::new(schema, error_log_file.path().to_str().unwrap()).unwrap()
+    ExcelValidator::new(schema).unwrap()
 }

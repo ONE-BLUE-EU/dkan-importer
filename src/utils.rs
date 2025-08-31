@@ -1,4 +1,7 @@
+use crate::ERRORS_LOG_FILE;
 use chrono::prelude::*;
+use std::fs::OpenOptions;
+use std::io::Write;
 
 /// Normalize text by replacing control characters with spaces and normalizing whitespace
 /// Replaces newlines and control characters with spaces (but keeps asterisks and full text)
@@ -212,4 +215,22 @@ pub fn delete_remote_file(
     }
     println!("🧹 Previous CSV file successfully deleted: {file_name}");
     return Ok(());
+}
+
+/// Centralized function to write error messages to the errors log file
+///
+/// # Arguments
+/// * `error_type` - A description of the error type/category (e.g., "Data Dictionary Duplicate Check Error")
+/// * `error_message` - The actual error message content
+pub fn write_error_to_log(error_type: &str, error_message: &str) {
+    let timestamp = chrono::Utc::now().to_rfc3339();
+    let log_entry = format!("\n[{}] {}:\n{}\n", timestamp, error_type, error_message);
+
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(ERRORS_LOG_FILE)
+    {
+        let _ = writeln!(file, "{}", log_entry);
+    }
 }

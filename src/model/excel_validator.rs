@@ -3,11 +3,9 @@ use calamine::{open_workbook, Data, Reader, Xlsx};
 use jsonschema::{ValidationError as JsonSchemaError, Validator};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufWriter, Write};
 use thiserror::Error;
 
-use crate::utils::normalize_string;
+use crate::utils::{normalize_string, write_error_to_log};
 
 /// Type alias for a parsed Excel row with row number and field data
 pub type ParsedExcelRow = (usize, Map<String, Value>);
@@ -94,12 +92,11 @@ pub struct FieldSchema {
 pub struct ExcelValidator {
     pub validator: Validator,
     field_schemas: HashMap<String, FieldSchema>,
-    error_log_path: String,
     pub validation_reports: Vec<ValidationReport>,
 }
 
 impl ExcelValidator {
-    pub fn new(schema: &Value, error_log_path: &str) -> Result<Self> {
+    pub fn new(schema: &Value) -> Result<Self> {
         // Create validator from schema
         let validator = jsonschema::validator_for(schema)
             .map_err(|e| anyhow::anyhow!("Invalid JSON schema: {}", e))?;
@@ -110,7 +107,6 @@ impl ExcelValidator {
         Ok(ExcelValidator {
             validator,
             field_schemas,
-            error_log_path: error_log_path.to_string(),
             validation_reports: Vec::new(),
         })
     }
@@ -240,13 +236,17 @@ impl ExcelValidator {
         let mut parsed_rows: Vec<ParsedExcelRow> = Vec::new();
 
         // Process each row
-        for (row_idx, row) in range.rows().enumerate() {
-            if row_idx == 0 {
+        for (row_index, row) in range.rows().enumerate() {
+            if row_index == 0 {
                 // First row contains headers - normalize them to match DKAN titles
                 headers = row
                     .iter()
                     .map(|cell| normalize_string(&cell.to_string()))
                     .collect();
+
+                // Check for duplicate headers
+                Self::check_header_duplicates(&headers)?;
+
                 continue;
             }
 
@@ -271,7 +271,7 @@ impl ExcelValidator {
                 }
             }
 
-            parsed_rows.push((row_idx + 1, json_obj));
+            parsed_rows.push((row_index + 1, json_obj));
         }
 
         Ok((headers, parsed_rows))
@@ -315,9 +315,60 @@ impl ExcelValidator {
             }
         }
 
-        self.write_error_log()?;
+        // Log validation errors using centralized logging if there are any errors
+        if !self.validation_reports.is_empty() {
+            let validation_report = self.format_validation_report();
+            write_error_to_log("Excel Validation Error Report", &validation_report);
+        }
 
         Ok(())
+    }
+
+    /// Format validation reports into a structured string for logging
+    fn format_validation_report(&self) -> String {
+        let mut report = String::new();
+
+        // Add title and separator
+        report.push_str("=============================\n");
+
+        // Generate ISO 8601 formatted timestamp
+        let now = chrono::Utc::now().to_rfc3339();
+        report.push_str(&format!("Generated at: {}\n\n", now));
+
+        // Add total error count
+        report.push_str(&format!(
+            "Total rows with errors: {}\n\n",
+            self.validation_reports.len()
+        ));
+
+        // Add detailed information for each validation report
+        for validation_report in &self.validation_reports {
+            report.push_str(&format!(
+                "Row {}: {} error(s)\n",
+                validation_report.row_number,
+                validation_report.errors.len()
+            ));
+
+            // Add row data (handle JSON serialization errors gracefully)
+            match serde_json::to_string_pretty(&validation_report.row_data) {
+                Ok(json_data) => {
+                    report.push_str(&format!("Row data: {}\n", json_data));
+                }
+                Err(_) => {
+                    report.push_str("Row data: [Error serializing data]\n");
+                }
+            }
+
+            report.push_str("Errors:\n");
+
+            // Add each specific error
+            for error in &validation_report.errors {
+                report.push_str(&format!("  - {}\n", error));
+            }
+            report.push('\n');
+        }
+
+        report
     }
 
     /// Export Excel data to CSV with schema-aware parsing
@@ -818,55 +869,6 @@ impl ExcelValidator {
         Ok(s.to_string())
     }
 
-    fn write_error_log(&self) -> Result<()> {
-        // Only create the error file if we have errors to log
-        if self.validation_reports.is_empty() {
-            return Ok(()); // No errors, no file needed
-        }
-
-        // Create error log file only when we have errors
-        let error_file = File::create(&self.error_log_path)?;
-        let mut error_log = BufWriter::new(error_file);
-
-        writeln!(error_log, "Excel Validation Error Report")?;
-        writeln!(error_log, "=============================")?;
-
-        // Generate ISO 8601 formatted timestamp
-        let now = chrono::Utc::now().to_rfc3339();
-        writeln!(error_log, "Generated at: {}", now)?;
-        writeln!(error_log)?;
-
-        writeln!(
-            error_log,
-            "Total rows with errors: {}",
-            self.validation_reports.len()
-        )?;
-        writeln!(error_log)?;
-
-        for report in &self.validation_reports {
-            writeln!(
-                error_log,
-                "Row {}: {} error(s)",
-                report.row_number,
-                report.errors.len()
-            )?;
-            writeln!(
-                error_log,
-                "Row data: {}",
-                serde_json::to_string_pretty(&report.row_data)?
-            )?;
-            writeln!(error_log, "Errors:")?;
-
-            for error in &report.errors {
-                writeln!(error_log, "  - {}", error)?;
-            }
-            writeln!(error_log)?;
-        }
-
-        error_log.flush()?;
-        Ok(())
-    }
-
     fn convert_float_with_validation(&self, f: f64) -> Value {
         // Handle special float values
         if f.is_nan() || f.is_infinite() {
@@ -1105,11 +1107,11 @@ impl ExcelValidator {
         let mut properties = Vec::new();
 
         // Find all text within single quotes
-        let mut chars = error_msg.chars().peekable();
+        let chars = error_msg.chars().peekable();
         let mut current_property = String::new();
         let mut in_quote = false;
 
-        while let Some(ch) = chars.next() {
+        for ch in chars {
             if ch == '\'' {
                 if in_quote {
                     // End of quoted property name
@@ -1240,5 +1242,54 @@ impl ExcelValidator {
         let days = value as i64;
         let seconds = ((value - days as f64) * 86400.0).round() as i64;
         excel_base.and_hms_opt(0, 0, 0).unwrap() + Duration::days(days) + Duration::seconds(seconds)
+    }
+
+    /// Check for duplicate column headers in Excel data
+    ///
+    /// # Arguments
+    /// * `headers` - Vector of header strings (already normalized if needed)
+    ///
+    /// # Returns
+    /// * `Ok(())` if no duplicates are found
+    /// * `Err(anyhow::Error)` with descriptive message if duplicates are found
+    pub fn check_header_duplicates(headers: &[String]) -> Result<(), anyhow::Error> {
+        let mut header_positions: HashMap<String, Vec<usize>> = HashMap::new();
+
+        // Collect all headers with their positions (normalize them)
+        for (index, header) in headers.iter().enumerate() {
+            let normalized_header = normalize_string(header);
+            header_positions
+                .entry(normalized_header)
+                .or_default()
+                .push(index);
+        }
+
+        let mut duplicate_headers = Vec::new();
+
+        // Find duplicates
+        for (header, positions) in &header_positions {
+            if positions.len() > 1 {
+                let columns_str = positions
+                    .iter()
+                    .map(|p| format!("column {}", p + 1)) // Convert to 1-based column indexing
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                duplicate_headers.push(format!("Header '{}' appears in: {}", header, columns_str));
+            }
+        }
+
+        if duplicate_headers.is_empty() {
+            Ok(())
+        } else {
+            let full_message = format!(
+                "Excel file contains duplicate column headers:\n{}\nPlease ensure all column headers are unique.",
+                duplicate_headers.into_iter().map(|msg| format!("  • {}", msg)).collect::<Vec<_>>().join("\n")
+            );
+
+            // Write duplicate check errors to the log file
+            write_error_to_log("Excel Header Duplicate Check Error", &full_message);
+
+            Err(anyhow::anyhow!(full_message))
+        }
     }
 }

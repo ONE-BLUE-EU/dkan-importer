@@ -1,6 +1,7 @@
-use crate::utils::normalize_string;
+use crate::utils::{normalize_string, write_error_to_log};
 use reqwest::blocking::Client;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 
 pub struct DataDictionary {
     pub id: String,
@@ -84,6 +85,9 @@ impl DataDictionary {
     pub fn convert_data_dictionary_to_json_schema(
         dkan_fields: &Value,
     ) -> Result<Value, anyhow::Error> {
+        // Check for duplicate fields first
+        Self::check_duplicates(dkan_fields)?;
+
         let title = dkan_fields
             .get("title")
             .and_then(|t| t.as_str())
@@ -106,7 +110,7 @@ impl DataDictionary {
 
             // Normalize name and title fields to handle control characters and whitespace
             let normalized_field_name = normalize_string(field_name);
-            let normalized_field_title = field_title.map(|t| normalize_string(t));
+            let normalized_field_title = field_title.map(normalize_string);
 
             let field_type = field
                 .get("type")
@@ -251,5 +255,92 @@ impl DataDictionary {
         json_schema.insert("additionalProperties".to_string(), json!(false));
 
         return Ok(Value::Object(json_schema));
+    }
+
+    /// Check for duplicate field names and titles in a data dictionary
+    ///
+    /// # Arguments
+    /// * `data_dictionary` - The data dictionary JSON containing a "fields" array
+    ///
+    /// # Returns
+    /// * `Ok(())` if no duplicates are found
+    /// * `Err(anyhow::Error)` with descriptive message if duplicates are found
+    pub fn check_duplicates(data_dictionary: &Value) -> Result<(), anyhow::Error> {
+        let fields = data_dictionary
+            .get("fields")
+            .and_then(|f| f.as_array())
+            .ok_or_else(|| {
+                anyhow::anyhow!("Data dictionary does not contain a valid 'fields' array")
+            })?;
+
+        let mut name_positions: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut title_positions: HashMap<String, Vec<usize>> = HashMap::new();
+
+        // Collect all names and titles with their positions
+        for (index, field) in fields.iter().enumerate() {
+            // Check field names
+            if let Some(name) = field.get("name").and_then(|n| n.as_str()) {
+                let normalized_name = normalize_string(name);
+                name_positions
+                    .entry(normalized_name)
+                    .or_default()
+                    .push(index);
+            }
+
+            // Check field titles
+            if let Some(title) = field.get("title").and_then(|t| t.as_str()) {
+                let normalized_title = normalize_string(title);
+                title_positions
+                    .entry(normalized_title)
+                    .or_default()
+                    .push(index);
+            }
+        }
+
+        let mut error_messages = Vec::new();
+
+        // Check for duplicate names
+        for (name, positions) in &name_positions {
+            if positions.len() > 1 {
+                let positions_str = positions
+                    .iter()
+                    .map(|p| (p + 1).to_string()) // Convert to 1-based indexing
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                error_messages.push(format!(
+                    "Field name '{}' appears at positions: {}",
+                    name, positions_str
+                ));
+            }
+        }
+
+        // Check for duplicate titles
+        for (title, positions) in &title_positions {
+            if positions.len() > 1 {
+                let positions_str = positions
+                    .iter()
+                    .map(|p| (p + 1).to_string()) // Convert to 1-based indexing
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                error_messages.push(format!(
+                    "Field title '{}' appears at positions: {}",
+                    title, positions_str
+                ));
+            }
+        }
+
+        if error_messages.is_empty() {
+            Ok(())
+        } else {
+            let full_message = format!(
+                "Data dictionary contains duplicate fields:\n{}\nPlease ensure all field names and titles are unique.",
+                error_messages.into_iter().map(|msg| format!("  • {}", msg)).collect::<Vec<_>>().join("\n")
+            );
+
+            // Write duplicate check errors to the log file
+            write_error_to_log("Data Dictionary Duplicate Check Error", &full_message);
+
+            Err(anyhow::anyhow!(full_message))
+        }
     }
 }

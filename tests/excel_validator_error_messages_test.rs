@@ -25,9 +25,7 @@ fn test_additional_properties_error_message() {
     });
 
     let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let error_log_file = common::create_test_error_log_file();
-    let validator =
-        ExcelValidator::new(&json_schema, error_log_file.path().to_str().unwrap()).unwrap();
+    let validator = ExcelValidator::new(&json_schema).unwrap();
 
     // Test data with additional properties not in schema
     let test_data = json!({
@@ -104,9 +102,7 @@ fn test_type_mismatch_error_includes_actual_value() {
     });
 
     let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let error_log_file = common::create_test_error_log_file();
-    let validator =
-        ExcelValidator::new(&json_schema, error_log_file.path().to_str().unwrap()).unwrap();
+    let validator = ExcelValidator::new(&json_schema).unwrap();
 
     // Test data with type mismatches that should show actual values in error messages
     let test_data = json!({
@@ -170,9 +166,7 @@ fn test_validation_report_with_enhanced_errors() {
     });
 
     let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let error_log_file = common::create_test_error_log_file();
-    let validator =
-        ExcelValidator::new(&json_schema, error_log_file.path().to_str().unwrap()).unwrap();
+    let validator = ExcelValidator::new(&json_schema).unwrap();
 
     // Create test data with type mismatches
     let test_rows = vec![
@@ -212,9 +206,7 @@ fn test_specific_volume_error_enhancement() {
     });
 
     let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let error_log_file = common::create_test_error_log_file();
-    let validator =
-        ExcelValidator::new(&json_schema, error_log_file.path().to_str().unwrap()).unwrap();
+    let validator = ExcelValidator::new(&json_schema).unwrap();
 
     // Test with the exact scenario: providing a string where an integer is expected
     // Use title-based property name
@@ -273,9 +265,7 @@ fn test_error_message_format_comparison() {
     });
 
     let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let error_log_file = common::create_test_error_log_file();
-    let validator =
-        ExcelValidator::new(&json_schema, error_log_file.path().to_str().unwrap()).unwrap();
+    let validator = ExcelValidator::new(&json_schema).unwrap();
 
     let test_data = json!({"Volume (mL) *": "25.7"});
     let is_valid = validator.validator.is_valid(&test_data);

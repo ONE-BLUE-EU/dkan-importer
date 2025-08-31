@@ -9,8 +9,7 @@ mod common;
 #[test]
 fn test_excel_validator_new_success() {
     let schema = common::create_test_schema();
-    let error_log_file = common::create_test_error_log_file();
-    let validator = ExcelValidator::new(&schema, error_log_file.path().to_str().unwrap());
+    let validator = ExcelValidator::new(&schema);
     assert!(validator.is_ok());
 }
 

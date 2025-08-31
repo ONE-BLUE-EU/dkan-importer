@@ -2,7 +2,6 @@
 //! Non-mandatory string fields should now accept null values
 
 use dkan_importer::model::{data_dictionary::DataDictionary, ExcelValidator};
-// use proptest::prelude::*;
 use serde_json::json;
 
 mod common;
@@ -81,9 +80,7 @@ fn test_string_null_validation_behavior() {
     });
 
     let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let error_log_file = common::create_test_error_log_file();
-    let validator =
-        ExcelValidator::new(&json_schema, error_log_file.path().to_str().unwrap()).unwrap();
+    let validator = ExcelValidator::new(&json_schema).unwrap();
 
     // Test 1: Valid data with null optional string fields
     let valid_data = json!({
@@ -211,9 +208,7 @@ fn test_mixed_field_types_with_null_handling() {
     assert_eq!(properties["Required Category *"]["type"], json!("string"));
 
     // Test validation
-    let error_log_file = common::create_test_error_log_file();
-    let validator =
-        ExcelValidator::new(&json_schema, error_log_file.path().to_str().unwrap()).unwrap();
+    let validator = ExcelValidator::new(&json_schema).unwrap();
 
     let valid_data = json!({
         "Required ID": "ID123",
@@ -255,9 +250,7 @@ fn test_regression_filter_cutoff_scenario() {
     });
 
     let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let error_log_file = common::create_test_error_log_file();
-    let validator =
-        ExcelValidator::new(&json_schema, error_log_file.path().to_str().unwrap()).unwrap();
+    let validator = ExcelValidator::new(&json_schema).unwrap();
 
     // This scenario was failing before: optional string field with null value
     let test_data = json!({
@@ -302,9 +295,7 @@ fn test_excel_cell_conversion_for_string_fields() {
     });
 
     let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&dkan_schema).unwrap();
-    let error_log_file = common::create_test_error_log_file();
-    let validator =
-        ExcelValidator::new(&json_schema, error_log_file.path().to_str().unwrap()).unwrap();
+    let validator = ExcelValidator::new(&json_schema).unwrap();
 
     // Test empty cell conversion for optional string field
     let empty_cell = Data::Empty;
@@ -555,9 +546,7 @@ fn test_comprehensive_string_scenarios() {
     assert_eq!(properties["Notes"]["type"], json!(["string", "null"])); // Optional = union
 
     // Test validation scenarios
-    let error_log_file = common::create_test_error_log_file();
-    let validator =
-        ExcelValidator::new(&json_schema, error_log_file.path().to_str().unwrap()).unwrap();
+    let validator = ExcelValidator::new(&json_schema).unwrap();
 
     // Scenario 1: All fields provided
     let data1 = json!({
