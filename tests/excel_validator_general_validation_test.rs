@@ -1,7 +1,6 @@
 //! Tests for core validator functionality
 
 use calamine::Data;
-use dkan_importer::model::ExcelValidator;
 use serde_json::{json, Value};
 
 mod common;
@@ -9,9 +8,8 @@ mod common;
 #[test]
 fn test_excel_validator_new_success() {
     let schema = common::create_test_schema();
-    let title_to_name_mapping = common::create_title_to_name_mapping_from_schema(&schema);
-    let validator = ExcelValidator::new(&schema, title_to_name_mapping);
-    assert!(validator.is_ok());
+    let validator = common::create_test_validator_with_schema(&schema);
+    assert!(validator.validator.is_valid(&json!({"name": "test", "age": 25, "email": "test@example.com"})));
 }
 
 #[test]

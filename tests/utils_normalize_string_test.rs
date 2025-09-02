@@ -233,8 +233,7 @@ fn test_integration_with_schema_validation() -> anyhow::Result<()> {
         "additionalProperties": false
     });
 
-    let title_to_name_mapping = common::create_title_to_name_mapping_from_schema(&schema);
-    let validator = ExcelValidator::new(&schema, title_to_name_mapping).unwrap();
+    let validator = common::create_test_validator_with_schema(&schema);
 
     // Test that normalized headers would create valid JSON
     let normalized_headers = vec![

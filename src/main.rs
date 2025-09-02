@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data_dictionary =
         DataDictionary::new(&arguments.base_url, &arguments.data_dictionary_id, &client)?;
     let json_schema = data_dictionary.to_json_schema()?;
-    let title_to_name_mapping = data_dictionary.get_title_to_name_mapping()?;
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&data_dictionary.fields)?;
     let mut validator = ExcelValidator::new(&json_schema, title_to_name_mapping)?;
     match validator.validate_excel(&arguments.excel_file, arguments.sheet_name.as_deref()) {
         Ok(_) => {

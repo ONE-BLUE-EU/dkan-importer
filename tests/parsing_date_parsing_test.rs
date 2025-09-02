@@ -1,4 +1,5 @@
-use dkan_importer::model::ExcelValidator;
+//! Tests for date parsing functionality in Excel validator
+
 use serde_json::{json, Value};
 
 mod common;
@@ -7,14 +8,10 @@ fn create_test_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "date_field": {
-                "type": "string",
-                "format": "date"
-            },
-            "datetime_field": {
-                "type": "string",
-                "format": "date-time"
-            }
+            "date_field": {"type": "string"},
+            "datetime_field": {"type": "string"},
+            "name": {"type": "string"},
+            "age": {"type": "integer"}
         }
     })
 }
@@ -46,8 +43,7 @@ fn test_convert_datetime_with_schema_intelligence() {
     // based on schema field formats, even without direct ExcelDateTime instances
 
     let schema = create_test_schema();
-    let title_to_name_mapping = common::create_title_to_name_mapping_from_schema(&schema);
-    let _validator = ExcelValidator::new(&schema, title_to_name_mapping).unwrap();
+    let _validator = common::create_test_validator_with_schema(&schema);
 
     // Test with a custom schema that has specific datetime formatting
     let custom_schema = json!({
@@ -64,8 +60,7 @@ fn test_convert_datetime_with_schema_intelligence() {
         }
     });
 
-    let title_to_name_mapping = common::create_title_to_name_mapping_from_schema(&custom_schema);
-    let custom_validator = ExcelValidator::new(&custom_schema, title_to_name_mapping).unwrap();
+    let custom_validator = common::create_test_validator_with_schema(&custom_schema);
 
     // Test that the method would format dates according to schema format
     // We can verify this logic works by testing the string conversion method
@@ -84,8 +79,7 @@ fn test_convert_datetime_with_schema_intelligence() {
 #[test]
 fn test_convert_datetime_string_with_schema_intelligence() {
     let schema = create_test_schema();
-    let title_to_name_mapping = common::create_title_to_name_mapping_from_schema(&schema);
-    let validator = ExcelValidator::new(&schema, title_to_name_mapping).unwrap();
+    let validator = common::create_test_validator_with_schema(&schema);
 
     // Test date field
     let value =
@@ -101,8 +95,7 @@ fn test_convert_datetime_string_with_schema_intelligence() {
 #[test]
 fn test_looks_like_date() {
     let schema = create_test_schema();
-    let title_to_name_mapping = common::create_title_to_name_mapping_from_schema(&schema);
-    let validator = ExcelValidator::new(&schema, title_to_name_mapping).unwrap();
+    let validator = common::create_test_validator_with_schema(&schema);
 
     // Test various date formats
     assert!(validator.looks_like_date("2024-09-15"));

@@ -312,35 +312,7 @@ impl DataDictionary {
         return Ok(Value::Object(json_schema));
     }
 
-    /// Create a mapping from normalized field titles to normalized field names
-    /// This is used for CSV export where we want to use machine names as column headers
-    /// while still using titles for Excel header matching
-    pub fn get_title_to_name_mapping(&self) -> Result<HashMap<String, String>, anyhow::Error> {
-        let fields = self
-            .fields
-            .get("fields")
-            .and_then(|f| f.as_array())
-            .ok_or_else(|| anyhow::anyhow!("Fields array not found in schema"))?;
 
-        let mut title_to_name_map = HashMap::new();
-
-        for field in fields {
-            let field_name = field
-                .get("name")
-                .and_then(|n| n.as_str())
-                .ok_or_else(|| anyhow::anyhow!("Field name not found"))?;
-            let field_title = field.get("title").and_then(|t| t.as_str());
-
-            // Fields are already normalized during initialization - no need to normalize again
-            if let Some(title) = field_title {
-                title_to_name_map.insert(title.to_string(), field_name.to_string());
-            } else {
-                title_to_name_map.insert(field_name.to_string(), field_name.to_string());
-            }
-        }
-
-        Ok(title_to_name_map)
-    }
 
     /// Create a mapping from normalized field titles to normalized field names
     /// This is a static method that can be easily unit tested
