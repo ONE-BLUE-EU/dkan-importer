@@ -24,8 +24,10 @@ fn test_additional_properties_error_message() {
         ]
     });
 
-    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let normalized_schema =
+        DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
     let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
     let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
@@ -103,8 +105,10 @@ fn test_type_mismatch_error_includes_actual_value() {
         ]
     });
 
-    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let normalized_schema =
+        DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
     let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
     let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
@@ -169,8 +173,10 @@ fn test_validation_report_with_enhanced_errors() {
         ]
     });
 
-    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let normalized_schema =
+        DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
     let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
     let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
@@ -211,8 +217,10 @@ fn test_specific_volume_error_enhancement() {
         ]
     });
 
-    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let normalized_schema =
+        DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
     let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
     let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
@@ -272,8 +280,10 @@ fn test_error_message_format_comparison() {
         ]
     });
 
-    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let normalized_schema =
+        DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
     let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
     let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 

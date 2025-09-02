@@ -9,7 +9,9 @@ mod common;
 fn test_excel_validator_new_success() {
     let schema = common::create_test_schema();
     let validator = common::create_test_validator_with_schema(&schema);
-    assert!(validator.validator.is_valid(&json!({"name": "test", "age": 25, "email": "test@example.com"})));
+    assert!(validator
+        .validator
+        .is_valid(&json!({"name": "test", "age": 25, "email": "test@example.com"})));
 }
 
 #[test]

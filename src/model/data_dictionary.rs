@@ -60,6 +60,11 @@ impl DataDictionary {
             ));
         }
 
+        let normalized_fields = Self::normalize_field_data(data.clone())?;
+
+        // Check for duplicate field names and titles after normalization
+        Self::check_duplicates(&normalized_fields)?;
+
         return Ok(DataDictionary {
             id: matching_schema
                 .get("identifier")
@@ -71,7 +76,7 @@ impl DataDictionary {
                 .and_then(|name| name.as_str())
                 .expect("Data dictionary title not found")
                 .to_string(),
-            fields: Self::normalize_field_data(data.clone())?,
+            fields: normalized_fields,
             url: data_dictionary_url,
         });
     }
@@ -311,8 +316,6 @@ impl DataDictionary {
 
         return Ok(Value::Object(json_schema));
     }
-
-
 
     /// Create a mapping from normalized field titles to normalized field names
     /// This is a static method that can be easily unit tested

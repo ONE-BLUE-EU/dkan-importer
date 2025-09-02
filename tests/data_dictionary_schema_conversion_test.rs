@@ -19,7 +19,8 @@ fn test_datetime_with_dkan_format() {
     });
 
     let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema).unwrap();
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let json_schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
     // Properties are now named after titles
     let props = &json_schema["properties"]["Date Field"];
     assert_eq!(props["type"], json!(["string", "null"])); // Now datetime fields get null union when optional
@@ -43,7 +44,8 @@ fn test_datetime_with_default_format() {
     });
 
     let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema).unwrap();
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let json_schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
     // Properties are now named after titles
     let props = &json_schema["properties"]["Date Field"];
     assert_eq!(props["type"], json!(["string", "null"])); // Now datetime fields get null union when optional
@@ -86,7 +88,8 @@ fn test_dkan_schema_conversion_basic() {
     });
 
     let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema).unwrap();
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let json_schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
 
     // Check schema structure
     assert_eq!(json_schema["type"], "object");

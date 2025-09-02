@@ -31,8 +31,10 @@ fn test_null_accepted_for_non_mandatory_number_field() {
         ]
     });
 
-    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let normalized_schema =
+        DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
 
     let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
     let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
@@ -76,8 +78,10 @@ fn test_null_rejected_for_mandatory_number_field() {
         ]
     });
 
-    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let normalized_schema =
+        DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
 
     let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
     let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
@@ -138,8 +142,10 @@ fn test_empty_cell_conversion_for_non_mandatory_number() {
         ]
     });
 
-    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let normalized_schema =
+        DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
     let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
     let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
@@ -199,8 +205,10 @@ fn test_empty_string_conversion_for_non_mandatory_number() {
         ]
     });
 
-    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let normalized_schema =
+        DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
     let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
     let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
@@ -279,8 +287,10 @@ fn test_comprehensive_validation_scenario() {
         ]
     });
 
-    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let normalized_schema =
+        DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
     let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
     let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
@@ -364,8 +374,10 @@ fn test_schema_generation_includes_null_types() {
         ]
     });
 
-    let normalized_schema = DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
-    let json_schema = DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let normalized_schema =
+        DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
     let properties = json_schema.get("properties").unwrap().as_object().unwrap();
 
     // Check mandatory string field - should be just "string"

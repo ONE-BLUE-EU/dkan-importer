@@ -43,20 +43,20 @@ pub fn create_test_schema() -> Value {
 #[allow(dead_code)]
 fn convert_schema_to_dkan_format(schema: &Value) -> Value {
     let mut dkan_format = serde_json::Map::new();
-    
+
     if let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) {
         let mut fields = Vec::new();
-        
+
         for (property_name, property_schema) in properties {
             let mut field = serde_json::Map::new();
             field.insert("name".to_string(), json!(property_name));
             field.insert("title".to_string(), json!(property_name));
-            
+
             // Copy over the type and other schema properties
             if let Some(field_type) = property_schema.get("type") {
                 field.insert("type".to_string(), field_type.clone());
             }
-            
+
             // Copy constraints if they exist
             if let Some(constraints) = property_schema.get("minimum") {
                 field.insert("minimum".to_string(), constraints.clone());
@@ -79,18 +79,18 @@ fn convert_schema_to_dkan_format(schema: &Value) -> Value {
             if let Some(constraints) = property_schema.get("enum") {
                 field.insert("enum".to_string(), constraints.clone());
             }
-            
+
             fields.push(Value::Object(field));
         }
-        
+
         dkan_format.insert("fields".to_string(), json!(fields));
     }
-    
+
     // Add title if it exists in the original schema
     if let Some(title) = schema.get("title") {
         dkan_format.insert("title".to_string(), title.clone());
     }
-    
+
     Value::Object(dkan_format)
 }
 
