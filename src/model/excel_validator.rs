@@ -296,21 +296,12 @@ impl ExcelValidator {
             // Apply additional intelligent type coercion if initial validation fails
             if !self.validator.is_valid(&row_value) {
                 row_value = self.apply_intelligent_type_coercion(row_value);
-                println!(
-                    "Value that was coerced: {:?}",
-                    serde_json::to_string_pretty(&row_value)
-                );
             }
 
             // Validate the row
             if self.validator.is_valid(&row_value) {
             } else {
                 let errors = self.collect_validation_errors(&row_value, row_number);
-
-                // Log to stdout
-                for error in &errors {
-                    eprintln!("  - {}", error);
-                }
 
                 // Store for later reporting
                 self.validation_reports.push(ValidationReport {
