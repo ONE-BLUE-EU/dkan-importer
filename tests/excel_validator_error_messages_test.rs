@@ -225,8 +225,8 @@ fn test_specific_volume_error_enhancement() {
     let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
     // Test with the exact scenario: providing a string where an integer is expected
-    // Use title-based property name
-    let test_data = json!({"Volume (mL) *": "15.5mL"});
+    // Use title-based property name (normalized form)
+    let test_data = json!({"Volume (mL)*": "15.5mL"});
 
     let is_valid = validator.validator.is_valid(&test_data);
     assert!(!is_valid, "Should have validation errors");
@@ -248,7 +248,7 @@ fn test_specific_volume_error_enhancement() {
     );
     assert!(error_message.contains("row[2]"), "Should reference row 2");
     assert!(
-        error_message.contains("volume_ml") || error_message.contains("Volume (mL)"),
+        error_message.contains("volume_ml") || error_message.contains("Volume (mL)*"),
         "Should reference the field"
     );
     assert!(
@@ -287,7 +287,7 @@ fn test_error_message_format_comparison() {
     let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
     let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
 
-    let test_data = json!({"Volume (mL) *": "25.7"});
+    let test_data = json!({"Volume (mL)*": "25.7"});
     let is_valid = validator.validator.is_valid(&test_data);
 
     if !is_valid {

@@ -41,12 +41,12 @@ fn test_non_mandatory_string_fields_accept_null() {
     let required = json_schema["required"].as_array().unwrap();
 
     // Check required fields (use title-based property names)
-    assert!(required.contains(&json!("Mandatory String *")));
+    assert!(required.contains(&json!("Mandatory String*")));
     assert!(required.contains(&json!("Required by Constraint")));
     assert!(!required.contains(&json!("Optional String")));
 
     // Check type structures - mandatory strings have simple types
-    assert_eq!(properties["Mandatory String *"]["type"], json!("string"));
+    assert_eq!(properties["Mandatory String*"]["type"], json!("string"));
     assert_eq!(
         properties["Required by Constraint"]["type"],
         json!("string")
@@ -91,7 +91,7 @@ fn test_string_null_validation_behavior() {
 
     // Test 1: Valid data with null optional string fields
     let valid_data = json!({
-        "Required Name *": "John Doe",
+        "Required Name*": "John Doe",
         "Optional Description": null,  // This should now be accepted
         "Optional Notes": null         // This should now be accepted
     });
@@ -104,7 +104,7 @@ fn test_string_null_validation_behavior() {
 
     // Test 2: Valid data with actual string values
     let valid_data2 = json!({
-        "Required Name *": "Jane Smith",
+        "Required Name*": "Jane Smith",
         "Optional Description": "A detailed description",
         "Optional Notes": "Some notes here"
     });
@@ -116,7 +116,7 @@ fn test_string_null_validation_behavior() {
 
     // Test 3: Valid data with mixed null and string values
     let valid_data3 = json!({
-        "Required Name *": "Bob Wilson",
+        "Required Name*": "Bob Wilson",
         "Optional Description": "Has description",
         "Optional Notes": null  // One null, one string
     });
@@ -128,7 +128,7 @@ fn test_string_null_validation_behavior() {
 
     // Test 4: Invalid data - required string field is null
     let invalid_data = json!({
-        "Required Name *": null,  // Required field cannot be null
+        "Required Name*": null,  // Required field cannot be null
         "Optional Description": "Some description",
         "Optional Notes": "Some notes"
     });
@@ -215,7 +215,7 @@ fn test_mixed_field_types_with_null_handling() {
 
     // Required fields should have simple types (use title-based property names)
     assert_eq!(properties["Required ID"]["type"], json!("string"));
-    assert_eq!(properties["Required Category *"]["type"], json!("string"));
+    assert_eq!(properties["Required Category*"]["type"], json!("string"));
 
     // Test validation
     let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
@@ -223,7 +223,7 @@ fn test_mixed_field_types_with_null_handling() {
 
     let valid_data = json!({
         "Required ID": "ID123",
-        "Required Category *": "CategoryA",
+        "Required Category*": "CategoryA",
         "Optional Name": null,      // String null - should work
         "Optional Age": null,       // Integer null - should work
         "Optional Score": null,     // Number null - should work
@@ -269,9 +269,9 @@ fn test_regression_filter_cutoff_scenario() {
 
     // This scenario was failing before: optional string field with null value
     let test_data = json!({
-        "Sample ID *": "SAMPLE_002",
+        "Sample ID*": "SAMPLE_002",
         "Filter cutoff (threshold)": null,  // This was causing the error before
-        "Measurement Value *": 42.5
+        "Measurement Value*": 42.5
     });
 
     let is_valid = validator.validator.is_valid(&test_data);
@@ -356,10 +356,10 @@ fn test_string_field_scenarios_comprehensive() {
         // (field_name, field_title, has_constraint, constraint_value, should_be_required)
         ("simple_field", "Simple Field", false, false, false),
         ("required_field*", "Required Field", false, false, true), // Name asterisk
-        ("field", "Field *", false, false, true),                  // Title asterisk
-        ("both*", "Both *", false, false, true),                   // Both asterisks
+        ("field", "Field*", false, false, true),                  // Title asterisk
+        ("both*", "Both*", false, false, true),                   // Both asterisks
         ("constraint_field", "Constraint Field", true, true, true), // Explicit constraint
-        ("override*", "Override *", true, false, true),            // Asterisk overrides constraint
+        ("override*", "Override*", true, false, true),            // Asterisk overrides constraint
     ];
 
     for (field_name, field_title, has_constraint, constraint_value, should_be_required) in
@@ -563,12 +563,12 @@ fn test_comprehensive_string_scenarios() {
     // Check required fields (use title-based property names)
     assert_eq!(required.len(), 3);
     assert!(required.contains(&json!("ID"))); // Name asterisk
-    assert!(required.contains(&json!("Name *"))); // Title asterisk
+    assert!(required.contains(&json!("Name*"))); // Title asterisk
     assert!(required.contains(&json!("Category"))); // Explicit constraint
 
     // Check type structures (use title-based property names)
     assert_eq!(properties["ID"]["type"], json!("string")); // Required = simple
-    assert_eq!(properties["Name *"]["type"], json!("string")); // Required = simple
+    assert_eq!(properties["Name*"]["type"], json!("string")); // Required = simple
     assert_eq!(properties["Category"]["type"], json!("string")); // Required = simple
     assert_eq!(properties["Description"]["type"], json!(["string", "null"])); // Optional = union
     assert_eq!(properties["Notes"]["type"], json!(["string", "null"])); // Optional = union
@@ -580,7 +580,7 @@ fn test_comprehensive_string_scenarios() {
     // Scenario 1: All fields provided
     let data1 = json!({
         "ID": "ID123",
-        "Name *": "John Doe",
+        "Name*": "John Doe",
         "Description": "A person",
         "Notes": "Some notes",
         "Category": "Person"
@@ -590,7 +590,7 @@ fn test_comprehensive_string_scenarios() {
     // Scenario 2: Optional fields as null
     let data2 = json!({
         "ID": "ID124",
-        "Name *": "Jane Smith",
+        "Name*": "Jane Smith",
         "Description": null,
         "Notes": null,
         "Category": "Person"
@@ -600,7 +600,7 @@ fn test_comprehensive_string_scenarios() {
     // Scenario 3: Mixed null and values for optional fields
     let data3 = json!({
         "ID": "ID125",
-        "Name *": "Bob Wilson",
+        "Name*": "Bob Wilson",
         "Description": "Another person",
         "Notes": null,
         "Category": "Person"
@@ -610,7 +610,7 @@ fn test_comprehensive_string_scenarios() {
     // Scenario 4: Required field as null (should fail)
     let data4 = json!({
         "ID": "ID126",
-        "Name *": null,  // Required field cannot be null
+        "Name*": null,  // Required field cannot be null
         "Description": "Someone",
         "Notes": "Notes",
         "Category": "Person"

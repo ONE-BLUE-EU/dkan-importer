@@ -1,4 +1,3 @@
-use dkan_importer::model::ExcelValidator;
 use dkan_importer::utils::normalize_string;
 use proptest::prelude::*;
 use serde_json::json;
@@ -114,6 +113,30 @@ fn test_normalize_string_preserves_internal_asterisks() {
 }
 
 #[test]
+fn test_normalize_string_removes_spaces_before_trailing_asterisk() {
+    // This test reproduces the specific issue: "Station Label *" vs "Station Label*"
+    // Both should normalize to the same value for validation purposes
+    assert_eq!(normalize_string("Station Label *"), "Station Label*");
+
+    assert_eq!(normalize_string("Station Label*"), "Station Label*");
+
+    // Test with multiple spaces before asterisk
+    assert_eq!(normalize_string("Field Name   *"), "Field Name*");
+
+    // Test with multiple asterisks
+    assert_eq!(normalize_string("Required Field ***"), "Required Field***");
+
+    // Test with space and multiple asterisks
+    assert_eq!(normalize_string("Optional Field  **"), "Optional Field**");
+
+    // Test that internal asterisks are still preserved (not trailing)
+    assert_eq!(
+        normalize_string("Field * With Internal"),
+        "Field * With Internal"
+    );
+}
+
+#[test]
 fn test_normalize_string_real_world_examples() {
     // From the original error message - asterisks now preserved
     assert_eq!(
@@ -169,7 +192,7 @@ proptest! {
         let normalized_first = first_line.split_whitespace().collect::<Vec<&str>>().join(" ");
         let normalized_second = second_line.split_whitespace().collect::<Vec<&str>>().join(" ");
 
-        let expected = if normalized_first.is_empty() && !normalized_second.is_empty() {
+        let expected_before_normalization = if normalized_first.is_empty() && !normalized_second.is_empty() {
             normalized_second
         } else if !normalized_first.is_empty() && normalized_second.is_empty() {
             normalized_first
@@ -178,6 +201,9 @@ proptest! {
         } else {
             String::new() // Both are empty
         };
+
+        // Apply the same normalization logic that the actual normalize_string function applies
+        let expected = normalize_string(&expected_before_normalization);
 
         prop_assert_eq!(result, expected);
     }

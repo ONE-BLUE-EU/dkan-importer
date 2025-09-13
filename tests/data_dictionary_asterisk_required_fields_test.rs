@@ -38,11 +38,11 @@ fn test_asterisk_in_title_makes_field_required() {
     // Check required fields (should contain property names, which are titles)
     let required = json_schema.get("required").unwrap().as_array().unwrap();
     assert!(
-        required.contains(&json!("Mandatory Field *")),
+        required.contains(&json!("Mandatory Field*")),
         "Field with asterisk in title should be required"
     );
     assert!(
-        required.contains(&json!("Number Field *")),
+        required.contains(&json!("Number Field*")),
         "Number field with asterisk in title should be required"
     );
     assert!(
@@ -53,27 +53,27 @@ fn test_asterisk_in_title_makes_field_required() {
     // Check that titles are preserved (asterisks NOT removed)
     let properties = json_schema.get("properties").unwrap().as_object().unwrap();
 
-    // Property keys should now be the titles themselves
-    assert!(properties.contains_key("Mandatory Field *"));
-    assert!(properties.contains_key("Number Field *"));
+    // Property keys should now be the normalized titles
+    assert!(properties.contains_key("Mandatory Field*"));
+    assert!(properties.contains_key("Number Field*"));
     assert!(properties.contains_key("Regular Field"));
 
-    // And titles should be preserved in the property definitions
+    // And titles should be normalized in the property definitions
     assert_eq!(
         properties
-            .get("Mandatory Field *")
+            .get("Mandatory Field*")
             .unwrap()
             .get("title")
             .unwrap(),
-        &json!("Mandatory Field *")
+        &json!("Mandatory Field*")
     );
     assert_eq!(
         properties
-            .get("Number Field *")
+            .get("Number Field*")
             .unwrap()
             .get("title")
             .unwrap(),
-        &json!("Number Field *")
+        &json!("Number Field*")
     );
     assert_eq!(
         properties
@@ -200,24 +200,24 @@ fn test_asterisk_in_both_name_and_title() {
     // Property names are now titles, so required array contains titles
     let required = json_schema.get("required").unwrap().as_array().unwrap();
     assert_eq!(required.len(), 3, "Should have 3 required fields");
-    assert!(required.contains(&json!("Both Fields *")));
+    assert!(required.contains(&json!("Both Fields*")));
     assert!(required.contains(&json!("Name Only")));
-    assert!(required.contains(&json!("Title Only *")));
+    assert!(required.contains(&json!("Title Only*")));
     assert!(!required.contains(&json!("Neither Field")));
 
     // Check that all original values are preserved
     let properties = json_schema.get("properties").unwrap().as_object().unwrap();
 
-    // Property keys should now be titles (not field names)
-    assert!(properties.contains_key("Both Fields *"));
+    // Property keys should now be normalized titles
+    assert!(properties.contains_key("Both Fields*"));
     assert!(properties.contains_key("Name Only"));
-    assert!(properties.contains_key("Title Only *"));
+    assert!(properties.contains_key("Title Only*"));
     assert!(properties.contains_key("Neither Field"));
 
-    // Titles preserved in property values
-    assert_eq!(properties["Both Fields *"]["title"], json!("Both Fields *"));
+    // Titles normalized in property values
+    assert_eq!(properties["Both Fields*"]["title"], json!("Both Fields*"));
     assert_eq!(properties["Name Only"]["title"], json!("Name Only"));
-    assert_eq!(properties["Title Only *"]["title"], json!("Title Only *"));
+    assert_eq!(properties["Title Only*"]["title"], json!("Title Only*"));
     assert_eq!(properties["Neither Field"]["title"], json!("Neither Field"));
 }
 
@@ -272,38 +272,35 @@ fn test_asterisk_with_explicit_constraints_preserved() {
     let required = json_schema.get("required").unwrap().as_array().unwrap();
     assert_eq!(required.len(), 5, "All fields should be required");
     assert!(required.contains(&json!("Asterisk Name")));
-    assert!(required.contains(&json!("Asterisk Title *")));
+    assert!(required.contains(&json!("Asterisk Title*")));
     assert!(required.contains(&json!("Constraint Required")));
-    assert!(required.contains(&json!("Both Methods *")));
-    assert!(required.contains(&json!("Asterisk Override *")));
+    assert!(required.contains(&json!("Both Methods*")));
+    assert!(required.contains(&json!("Asterisk Override*")));
 
     // Check that all names and titles are preserved
     let properties = json_schema.get("properties").unwrap().as_object().unwrap();
     assert_eq!(properties["Asterisk Name"]["title"], json!("Asterisk Name"));
     assert_eq!(
-        properties["Asterisk Title *"]["title"],
-        json!("Asterisk Title *")
+        properties["Asterisk Title*"]["title"],
+        json!("Asterisk Title*")
     );
     assert_eq!(
         properties["Constraint Required"]["title"],
         json!("Constraint Required")
     );
+    assert_eq!(properties["Both Methods*"]["title"], json!("Both Methods*"));
     assert_eq!(
-        properties["Both Methods *"]["title"],
-        json!("Both Methods *")
-    );
-    assert_eq!(
-        properties["Asterisk Override *"]["title"],
-        json!("Asterisk Override *")
+        properties["Asterisk Override*"]["title"],
+        json!("Asterisk Override*")
     );
 
     // Check that all mandatory fields have simple types (not union with null)
     // Properties are now named after titles, not field names
     assert_eq!(properties["Asterisk Name"]["type"], json!("number"));
-    assert_eq!(properties["Asterisk Title *"]["type"], json!("number"));
+    assert_eq!(properties["Asterisk Title*"]["type"], json!("number"));
     assert_eq!(properties["Constraint Required"]["type"], json!("number"));
-    assert_eq!(properties["Both Methods *"]["type"], json!("integer"));
-    assert_eq!(properties["Asterisk Override *"]["type"], json!("boolean"));
+    assert_eq!(properties["Both Methods*"]["type"], json!("integer"));
+    assert_eq!(properties["Asterisk Override*"]["type"], json!("boolean"));
 }
 
 #[test]
@@ -357,14 +354,14 @@ fn test_asterisk_edge_cases_preserved() {
     let properties = json_schema.get("properties").unwrap().as_object().unwrap();
 
     // Multiple asterisks at end should be treated as mandatory (property name is title)
-    assert!(required.contains(&json!("Multiple ***")));
-    assert_eq!(properties["Multiple ***"]["title"], json!("Multiple ***"));
+    assert!(required.contains(&json!("Multiple***")));
+    assert_eq!(properties["Multiple***"]["title"], json!("Multiple***"));
 
     // Space after asterisk should work (using title as property name, after normalization trailing spaces are trimmed)
-    assert!(required.contains(&json!("Spaces Before *")));
+    assert!(required.contains(&json!("Spaces Before*")));
     assert_eq!(
-        properties["Spaces Before *"]["title"],
-        json!("Spaces Before *")
+        properties["Spaces Before*"]["title"],
+        json!("Spaces Before*")
     );
 
     // Asterisk not at end should NOT make field mandatory (property name is title)
@@ -383,8 +380,8 @@ fn test_asterisk_edge_cases_preserved() {
     );
 
     // Title ends with asterisk should be required (using title as property name)
-    assert!(required.contains(&json!("Title Ends *")));
-    assert_eq!(properties["Title Ends *"]["title"], json!("Title Ends *"));
+    assert!(required.contains(&json!("Title Ends*")));
+    assert_eq!(properties["Title Ends*"]["title"], json!("Title Ends*"));
 
     // No title field but name has asterisk should be required
     assert!(required.contains(&json!("no_title_field*")));
@@ -427,7 +424,7 @@ fn test_excel_matching_with_preserved_asterisks() {
     // Test Excel data that matches the title-based property names
     let excel_data = json!({
         "Sample ID": "SAMPLE_001",        // Must match title (schema property name)
-        "Temperature *": 22.5,            // Must match title (schema property name)
+        "Temperature*": 22.5,            // Must match title (schema property name)
         "Notes": ""                       // Optional string field can be empty string
     });
 
@@ -444,7 +441,7 @@ fn test_excel_matching_with_preserved_asterisks() {
     // Test missing required field (name with asterisk)
     let invalid_data = json!({
         // "Sample ID": "SAMPLE_002",     // Missing required field with asterisk in name
-        "Temperature *": 20.0,
+        "Temperature*": 20.0,
         "Notes": "test"
     });
 
@@ -456,7 +453,7 @@ fn test_excel_matching_with_preserved_asterisks() {
     // Test missing required field (title with asterisk)
     let invalid_data2 = json!({
         "Sample ID": "SAMPLE_003",
-        // "Temperature *": 18.5,         // Missing required field (title has asterisk)
+        // "Temperature*": 18.5,         // Missing required field (title has asterisk)
         "Notes": "test"
     });
 
@@ -502,7 +499,7 @@ fn test_type_handling_with_preserved_asterisks() {
 
     // Mandatory fields should have simple types (using title-based property names)
     assert_eq!(properties["Mandatory String"]["type"], json!("string"));
-    assert_eq!(properties["Mandatory Number *"]["type"], json!("number"));
+    assert_eq!(properties["Mandatory Number*"]["type"], json!("number"));
 
     // Optional fields should have union types with null
     assert_eq!(
@@ -517,7 +514,7 @@ fn test_type_handling_with_preserved_asterisks() {
     // Verify required fields (using title-based property names)
     let required = json_schema.get("required").unwrap().as_array().unwrap();
     assert!(required.contains(&json!("Mandatory String")));
-    assert!(required.contains(&json!("Mandatory Number *")));
+    assert!(required.contains(&json!("Mandatory Number*")));
     assert!(!required.contains(&json!("Optional Number")));
     assert!(!required.contains(&json!("Optional Boolean")));
 }
@@ -579,8 +576,8 @@ fn test_real_world_scenario_with_preservation() {
     let required = json_schema.get("required").unwrap().as_array().unwrap();
     assert_eq!(required.len(), 4);
     assert!(required.contains(&json!("Sample Identifier"))); // Name asterisk
-    assert!(required.contains(&json!("Collection Date *"))); // Title asterisk
-    assert!(required.contains(&json!("Latitude *"))); // Both name and title asterisks
+    assert!(required.contains(&json!("Collection Date*"))); // Title asterisk
+    assert!(required.contains(&json!("Latitude*"))); // Both name and title asterisks
     assert!(required.contains(&json!("Longitude"))); // Name asterisk only
 
     // Verify all titles are preserved (properties are named after titles)
@@ -590,10 +587,10 @@ fn test_real_world_scenario_with_preservation() {
         json!("Sample Identifier")
     );
     assert_eq!(
-        properties["Collection Date *"]["title"],
-        json!("Collection Date *")
+        properties["Collection Date*"]["title"],
+        json!("Collection Date*")
     );
-    assert_eq!(properties["Latitude *"]["title"], json!("Latitude *"));
+    assert_eq!(properties["Latitude*"]["title"], json!("Latitude*"));
     assert_eq!(properties["Longitude"]["title"], json!("Longitude"));
     assert_eq!(
         properties["Water Temperature (°C)"]["title"],
@@ -606,8 +603,8 @@ fn test_real_world_scenario_with_preservation() {
 
     // Verify type handling (using title-based property names)
     assert_eq!(properties["Sample Identifier"]["type"], json!("string")); // Mandatory = simple type
-    assert_eq!(properties["Collection Date *"]["type"], json!("string")); // Mandatory datetime = string
-    assert_eq!(properties["Latitude *"]["type"], json!("number")); // Mandatory = simple type
+    assert_eq!(properties["Collection Date*"]["type"], json!("string")); // Mandatory datetime = string
+    assert_eq!(properties["Latitude*"]["type"], json!("number")); // Mandatory = simple type
     assert_eq!(properties["Longitude"]["type"], json!("number")); // Mandatory = simple type
     assert_eq!(
         properties["Water Temperature (°C)"]["type"],
@@ -623,8 +620,8 @@ fn test_real_world_scenario_with_preservation() {
     let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
     let valid_data = json!({
         "Sample Identifier": "MARINE_001",         // Required field with asterisk in name
-        "Collection Date *": "2024-01-15T10:30:00Z", // Required field with asterisk in title
-        "Latitude *": 45.123,                      // Required field (name asterisk)
+        "Collection Date*": "2024-01-15T10:30:00Z", // Required field with asterisk in title
+        "Latitude*": 45.123,                      // Required field (name asterisk)
         "Longitude": 12.456,                       // Required field (name asterisk)
         "Water Temperature (°C)": null,            // Optional field can be null
         "Salinity (ppt)": 35.2                     // Optional field with value
