@@ -1113,14 +1113,61 @@ impl ExcelValidator {
     }
 
     fn extract_required_field(&self, error_msg: &str) -> String {
-        // Extract field name from messages like "'email' is a required property"
+        // Extract field name from messages with double quotes: "field_name" is a required property
+        if let Some(start) = error_msg.find('"') {
+            let start = start + 1;
+            if let Some(end) = error_msg[start..].find('"') {
+                return error_msg[start..start + end].to_string();
+            }
+        }
+
+        // Fallback: Extract field name from messages with single quotes: 'field_name' is a required property
         if let Some(start) = error_msg.find('\'') {
             let start = start + 1;
             if let Some(end) = error_msg[start..].find('\'') {
                 return error_msg[start..start + end].to_string();
             }
         }
-        "unknown field".to_string()
+
+        // Additional fallback patterns for different jsonschema error formats
+        // Look for patterns like 'property "field_name" is required'
+        if let Some(start) = error_msg.find("property \"") {
+            let start = start + 10; // length of "property \""
+            if let Some(end) = error_msg[start..].find('"') {
+                return error_msg[start..start + end].to_string();
+            }
+        }
+
+        // Look for patterns like 'required property: field_name'
+        if let Some(start) = error_msg.find("required property: ") {
+            let start = start + 19; // length of "required property: "
+            let field_name = error_msg[start..]
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_string();
+            if !field_name.is_empty() {
+                return field_name;
+            }
+        }
+
+        // Look for patterns like 'field_name is required' (at the beginning of message)
+        if error_msg.contains("is required") {
+            let words: Vec<&str> = error_msg.split_whitespace().collect();
+            for (i, word) in words.iter().enumerate() {
+                if *word == "is" && i + 1 < words.len() && words[i + 1] == "required" && i > 0 {
+                    let field_name = words[i - 1]
+                        .trim_matches(|c| c == '\'' || c == '"' || c == '`')
+                        .to_string();
+                    if !field_name.is_empty() {
+                        return field_name;
+                    }
+                }
+            }
+        }
+
+        // If all parsing fails, return a more descriptive error message
+        format!("Could not parse field name from: {}", error_msg)
     }
 
     fn extract_pattern(&self, error_msg: &str) -> String {
