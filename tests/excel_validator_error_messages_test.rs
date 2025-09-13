@@ -51,8 +51,15 @@ fn test_additional_properties_error_message() {
         .iter_errors(&test_data)
         .map(|error| {
             let path = "row[1]"; // Simulate row path
+            let field_name = error.instance_path.to_string();
+            let is_required_field = field_name.ends_with('*');
             validator
-                .analyze_jsonschema_error(&error.to_string(), path, &error.instance)
+                .analyze_jsonschema_error_with_context(
+                    &error.to_string(),
+                    path,
+                    &error.instance,
+                    is_required_field,
+                )
                 .to_string()
         })
         .collect();
@@ -234,10 +241,13 @@ fn test_specific_volume_error_enhancement() {
     // Get the first error and convert it to our enhanced format
     let jsonschema_error = validator.validator.iter_errors(&test_data).next().unwrap();
     let path = format!("row[2].{}", jsonschema_error.instance_path);
-    let enhanced_error = validator.analyze_jsonschema_error(
+    let field_name = jsonschema_error.instance_path.to_string();
+    let is_required_field = field_name.ends_with('*');
+    let enhanced_error = validator.analyze_jsonschema_error_with_context(
         &jsonschema_error.to_string(),
         &path,
         &jsonschema_error.instance,
+        is_required_field,
     );
     let error_message = enhanced_error.to_string();
 
@@ -294,10 +304,13 @@ fn test_error_message_format_comparison() {
         // Get the first error and convert it to our enhanced format
         let jsonschema_error = validator.validator.iter_errors(&test_data).next().unwrap();
         let path = format!("row[2].{}", jsonschema_error.instance_path);
-        let enhanced_error = validator.analyze_jsonschema_error(
+        let field_name = jsonschema_error.instance_path.to_string();
+        let is_required_field = field_name.ends_with('*');
+        let enhanced_error = validator.analyze_jsonschema_error_with_context(
             &jsonschema_error.to_string(),
             &path,
             &jsonschema_error.instance,
+            is_required_field,
         );
         let error_message = enhanced_error.to_string();
 
@@ -306,6 +319,104 @@ fn test_error_message_format_comparison() {
         assert!(
             error_message.contains("\"25.7\""),
             "Error should show the actual value that caused the problem"
+        );
+    }
+}
+
+#[test]
+fn test_required_field_null_error_enhancement() {
+    // Test that required fields (ending with *) show enhanced error message when null
+    let dkan_schema = json!({
+        "title": "Required Field Test",
+        "fields": [
+            {
+                "name": "institution_code",
+                "title": "Institution Code*",   // Required field with asterisk
+                "type": "string"
+            },
+            {
+                "name": "optional_field",
+                "title": "Optional Field",      // Optional field
+                "type": "string"
+            }
+        ]
+    });
+
+    let normalized_schema =
+        DataDictionary::normalize_field_data_for_tests(dkan_schema.clone()).unwrap();
+    let json_schema =
+        DataDictionary::convert_data_dictionary_to_json_schema(&normalized_schema).unwrap();
+    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_schema).unwrap();
+    let validator = ExcelValidator::new(&json_schema, title_to_name_mapping).unwrap();
+
+    // Test with null value for required field (should show enhanced message)
+    let test_data_required = json!({"Institution Code*": null, "Optional Field": "test"});
+    let is_valid_required = validator.validator.is_valid(&test_data_required);
+    assert!(
+        !is_valid_required,
+        "Required field with null should be invalid"
+    );
+
+    if !is_valid_required {
+        let jsonschema_error = validator
+            .validator
+            .iter_errors(&test_data_required)
+            .next()
+            .unwrap();
+        let path = format!("row[2].{}", jsonschema_error.instance_path);
+        let field_name = jsonschema_error.instance_path.to_string();
+        let is_required_field = field_name.ends_with('*');
+        let enhanced_error = validator.analyze_jsonschema_error_with_context(
+            &jsonschema_error.to_string(),
+            &path,
+            &jsonschema_error.instance,
+            is_required_field,
+        );
+        let error_message = enhanced_error.to_string();
+
+        // Verify the enhanced error message includes "required field"
+        assert!(
+            error_message.contains("required field"),
+            "Error for required field should mention it's required. Got: {}",
+            error_message
+        );
+        assert!(
+            error_message.contains("Institution Code*") || error_message.contains("row[2]"),
+            "Error should reference the field or path"
+        );
+        assert!(
+            error_message.contains("null"),
+            "Error should mention null value"
+        );
+    }
+
+    // Test with null value for optional field (should NOT show enhanced message)
+    let test_data_optional = json!({"Institution Code*": "test", "Optional Field": null});
+    let is_valid_optional = validator.validator.is_valid(&test_data_optional);
+    // Optional field with null might be valid depending on schema, but if not, error shouldn't mention "required"
+
+    if !is_valid_optional {
+        let jsonschema_error = validator
+            .validator
+            .iter_errors(&test_data_optional)
+            .next()
+            .unwrap();
+        let path = format!("row[2].{}", jsonschema_error.instance_path);
+        let field_name = jsonschema_error.instance_path.to_string();
+        let is_required_field = field_name.ends_with('*');
+        let enhanced_error = validator.analyze_jsonschema_error_with_context(
+            &jsonschema_error.to_string(),
+            &path,
+            &jsonschema_error.instance,
+            is_required_field,
+        );
+        let error_message = enhanced_error.to_string();
+
+        // Optional field error should NOT mention "required field"
+        assert!(
+            !error_message.contains("required field"),
+            "Error for optional field should not mention 'required field'. Got: {}",
+            error_message
         );
     }
 }

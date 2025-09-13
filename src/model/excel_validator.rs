@@ -931,19 +931,29 @@ impl ExcelValidator {
                     format!("row[{}].{}", row_number, error.instance_path)
                 };
 
+                // Extract field name directly from the jsonschema error instance path
+                let field_name = error.instance_path.to_string();
+                let is_required_field = field_name.ends_with('*');
+
                 // Analyze the error message to determine the specific validation failure
                 let error_msg = error.to_string();
-                self.analyze_jsonschema_error(&error_msg, &path, &error.instance)
+                self.analyze_jsonschema_error_with_context(
+                    &error_msg,
+                    &path,
+                    &error.instance,
+                    is_required_field,
+                )
             })
             .collect()
     }
 
-    /// Analyzes jsonschema error messages and converts them to appropriate ValidationError types
-    pub fn analyze_jsonschema_error(
+    /// Analyzes jsonschema error messages with additional context about whether the field is required
+    pub fn analyze_jsonschema_error_with_context(
         &self,
         error_msg: &str,
         path: &str,
         instance: &Value,
+        is_required_field: bool,
     ) -> ValidationError {
         let lower_msg = error_msg.to_lowercase();
 
@@ -951,6 +961,16 @@ impl ExcelValidator {
         if lower_msg.contains("is not of type") {
             let expected_type = self.extract_expected_type(error_msg);
             let actual_type = self.get_json_type_name(instance);
+            let is_null_value = matches!(instance, Value::Null);
+
+            if is_required_field && is_null_value {
+                return ValidationError::TypeMismatch {
+                    path: path.to_string(),
+                    expected: format!("{} (required field)", expected_type),
+                    actual: actual_type,
+                    value: self.safe_value_string(instance),
+                };
+            }
 
             return ValidationError::TypeMismatch {
                 path: path.to_string(),
