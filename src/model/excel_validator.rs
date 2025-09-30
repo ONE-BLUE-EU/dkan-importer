@@ -809,21 +809,44 @@ impl ExcelValidator {
     }
 
     /// Apply intelligent type coercion after initial validation failure
-    fn apply_intelligent_type_coercion(&self, mut row_value: Value) -> Value {
+    pub fn apply_intelligent_type_coercion(&self, mut row_value: Value) -> Value {
         if let Some(obj) = row_value.as_object_mut() {
             for (field_name, field_value) in obj.iter_mut() {
                 if let Some(field_schema) = self.field_schemas.get(field_name) {
-                    // Only apply additional coercion to string values that might need conversion
+                    // Apply coercion to string values that might need conversion
                     if let Some(string_val) = field_value.as_str() {
                         let coerced = self.coerce_string_to_schema_type(string_val, field_schema);
                         if coerced != *field_value {
                             *field_value = coerced;
                         }
                     }
+                    // Apply coercion to numeric values that should be strings
+                    else if self.schema_expects_string(field_schema) {
+                        match field_value {
+                            Value::Number(n) => {
+                                // Convert number to string when schema expects string
+                                *field_value = Value::String(n.to_string());
+                            }
+                            Value::Bool(b) => {
+                                // Convert boolean to string when schema expects string
+                                *field_value = Value::String(b.to_string());
+                            }
+                            _ => {}
+                        }
+                    }
                 }
             }
         }
         row_value
+    }
+
+    /// Check if the field schema expects a string type (including union types with string)
+    fn schema_expects_string(&self, field_schema: &FieldSchema) -> bool {
+        match &field_schema.field_type {
+            SchemaType::String => true,
+            SchemaType::Mixed(types) => types.contains(&SchemaType::String),
+            _ => false,
+        }
     }
 
     /// Fallback intelligent string conversion without schema
