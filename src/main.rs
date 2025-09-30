@@ -32,8 +32,8 @@ struct Args {
     data_dictionary_id: String,
 
     /// Optional sheet name to validate (if not specified, validates Sheet1)
-    #[arg(long)]
-    sheet_name: Option<String>,
+    #[arg(long, default_value = "Sheet1")]
+    sheet_name: String,
 
     /// The username for the remote API authentication.
     #[arg(long)]
@@ -75,7 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let title_to_name_mapping =
         DataDictionary::create_title_to_name_mapping(&data_dictionary.fields)?;
     let mut validator = ExcelValidator::new(&json_schema, title_to_name_mapping)?;
-    match validator.validate_excel(&arguments.excel_file, arguments.sheet_name.as_deref()) {
+    match validator.validate_excel(&arguments.excel_file, Some(&arguments.sheet_name)) {
         Ok(_) => {
             if validator.validation_reports.is_empty() {
                 println!("✅ Validation completed!");
@@ -95,12 +95,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let csv_filename =
-        generate_unique_filename(&arguments.dataset_id, &arguments.data_dictionary_id);
+    let csv_filename = generate_unique_filename(&arguments.dataset_id, &arguments.sheet_name);
     // Create a csv since the validation is successful. Use schema-aware parsing for proper date formatting.
     match validator.export_to_csv(
         &arguments.excel_file,
-        arguments.sheet_name.as_deref(),
+        Some(&arguments.sheet_name),
         &csv_filename,
     ) {
         Ok(_) => {

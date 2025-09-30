@@ -32,7 +32,7 @@ pub fn normalize_string(value: &str) -> String {
         let mut chars = reversed.chars();
 
         // Add all leading asterisks
-        while let Some(ch) = chars.next() {
+        for ch in chars.by_ref() {
             if ch == '*' {
                 result.push(ch);
             } else if ch == ' ' {
@@ -55,10 +55,11 @@ pub fn normalize_string(value: &str) -> String {
     }
 }
 
-pub fn generate_unique_filename(dataset_id: &str, data_dictionary_id: &str) -> String {
+pub fn generate_unique_filename(dataset_id: &str, excel_sheet_name: &str) -> String {
     let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-    let filename = format!("{dataset_id}_{data_dictionary_id}_{timestamp}.csv");
-    return filename;
+    let excel_sheet_name = normalize_string(excel_sheet_name);
+    let filename = format!("{excel_sheet_name}_{timestamp}_{dataset_id}.csv");
+    return filename.to_lowercase();
 }
 
 // Function to upload CSV to custom importer endpoint
