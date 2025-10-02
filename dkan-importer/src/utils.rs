@@ -1,62 +1,7 @@
-use crate::ERRORS_LOG_FILE;
-use chrono::prelude::*;
-use std::fs::OpenOptions;
-use std::io::Write;
-
-/// Normalize text by replacing control characters with spaces and normalizing whitespace
-/// Replaces newlines and control characters with spaces (but keeps asterisks and full text)
-/// Also removes spaces before trailing asterisks for consistent field name matching
-pub fn normalize_string(value: &str) -> String {
-    let normalized = value
-        .chars() // Process character by character
-        .map(|c| {
-            if c.is_control() {
-                ' ' // Replace control characters (newlines, tabs, etc.) with spaces
-            } else {
-                c // Keep all other characters including asterisks
-            }
-        })
-        .collect::<String>()
-        .split_whitespace() // Split on whitespace to normalize multiple spaces
-        .collect::<Vec<&str>>()
-        .join(" ") // Join back with single spaces
-        .trim() // Remove leading/trailing whitespace
-        .to_string();
-
-    // Simple approach: reverse string, remove spaces before trailing asterisks, reverse back
-    let reversed: String = normalized.chars().rev().collect();
-
-    if reversed.starts_with('*') {
-        // Find where asterisks end and remove spaces until next non-space character
-        let mut result = String::new();
-        let mut chars = reversed.chars();
-
-        // Add all leading asterisks
-        for ch in chars.by_ref() {
-            if ch == '*' {
-                result.push(ch);
-            } else if ch == ' ' {
-                // Skip spaces after asterisks
-                continue;
-            } else {
-                // Found first non-space, non-asterisk character
-                result.push(ch);
-                break;
-            }
-        }
-
-        // Add the rest of the string
-        result.extend(chars);
-
-        // Reverse back
-        result.chars().rev().collect()
-    } else {
-        normalized
-    }
-}
+use importer_lib::utils::{get_local_datetime_with_format, normalize_string};
 
 pub fn generate_unique_filename(dataset_id: &str, excel_sheet_name: &str) -> String {
-    let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+    let timestamp = get_local_datetime_with_format("%Y-%m-%d_%H-%M-%S");
     let excel_sheet_name = normalize_string(excel_sheet_name);
     let filename = format!("{excel_sheet_name}_{timestamp}_{dataset_id}.csv");
     return filename.to_lowercase();
@@ -248,22 +193,4 @@ pub fn delete_remote_file(
     }
     println!("🧹 Previous CSV file successfully deleted: {file_name}");
     return Ok(());
-}
-
-/// Centralized function to write error messages to the errors log file
-///
-/// # Arguments
-/// * `error_type` - A description of the error type/category (e.g., "Data Dictionary Duplicate Check Error")
-/// * `error_message` - The actual error message content
-pub fn write_error_to_log(error_type: &str, error_message: &str) {
-    let timestamp = chrono::Utc::now().to_rfc3339();
-    let log_entry = format!("\n[{}] {}:\n{}\n", timestamp, error_type, error_message);
-
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(ERRORS_LOG_FILE)
-    {
-        let _ = writeln!(file, "{}", log_entry);
-    }
 }

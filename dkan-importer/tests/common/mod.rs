@@ -1,6 +1,4 @@
-//! Common test utilities for the dkan-importer library tests
-
-use dkan_importer::model::{DataDictionary, ExcelValidator};
+use importer_lib::{ExcelValidator, ExcelValidatorBuilder};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
@@ -98,18 +96,18 @@ fn convert_schema_to_dkan_format(schema: &Value) -> Value {
 #[allow(dead_code)]
 pub fn create_test_validator() -> ExcelValidator {
     let schema = create_test_schema();
-    let title_to_name_mapping = create_test_title_to_name_mapping();
-    ExcelValidator::new(&schema, title_to_name_mapping).unwrap()
+    ExcelValidatorBuilder::new("test.xlsx", "Sheet1", schema)
+        .build()
+        .unwrap()
 }
 
 // Creates a test validator with a custom schema
 // It is used in tests that need a custom schema
 #[allow(dead_code)]
 pub fn create_test_validator_with_schema(schema: &Value) -> ExcelValidator {
-    // Convert JSON Schema format to DKAN format for the production method
-    let dkan_format = convert_schema_to_dkan_format(schema);
-    let title_to_name_mapping = DataDictionary::create_title_to_name_mapping(&dkan_format).unwrap();
-    ExcelValidator::new(schema, title_to_name_mapping).unwrap()
+    ExcelValidatorBuilder::new("test.xlsx", "Sheet1", schema.clone())
+        .build()
+        .unwrap()
 }
 
 // Creates a test title-to-name mapping for testing

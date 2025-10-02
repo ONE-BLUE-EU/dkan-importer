@@ -1,4 +1,4 @@
-use crate::utils::{normalize_string, write_error_to_log};
+use importer_lib::utils::{normalize_string, write_error_to_log};
 use reqwest::blocking::Client;
 use serde_json::{json, Value};
 use std::collections::HashMap;

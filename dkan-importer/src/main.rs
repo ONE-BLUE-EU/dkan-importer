@@ -5,13 +5,13 @@
 
 use clap::Parser;
 use dkan_importer::{
-    model::{DataDictionary, ExcelValidator},
+    model::DataDictionary,
     utils::{
         dataset_add_distribution, delete_remote_file, generate_unique_filename,
         upload_distribution_csv_file,
     },
-    ERRORS_LOG_FILE,
 };
+use importer_lib::{ExcelValidatorBuilder, ERRORS_LOG_FILE};
 use rpassword::prompt_password;
 
 #[derive(Parser)]
@@ -74,8 +74,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let json_schema = data_dictionary.to_json_schema()?;
     let title_to_name_mapping =
         DataDictionary::create_title_to_name_mapping(&data_dictionary.fields)?;
-    let mut validator = ExcelValidator::new(&json_schema, title_to_name_mapping)?;
-    match validator.validate_excel(&arguments.excel_file, Some(&arguments.sheet_name)) {
+    let mut validator =
+        ExcelValidatorBuilder::new(&arguments.excel_file, &arguments.sheet_name, json_schema)
+            .build()?;
+    match validator.validate_excel() {
         Ok(_) => {
             if validator.validation_reports.is_empty() {
                 println!("✅ Validation completed!");
@@ -97,11 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let csv_filename = generate_unique_filename(&arguments.dataset_id, &arguments.sheet_name);
     // Create a csv since the validation is successful. Use schema-aware parsing for proper date formatting.
-    match validator.export_to_csv(
-        &arguments.excel_file,
-        Some(&arguments.sheet_name),
-        &csv_filename,
-    ) {
+    match validator.export_to_csv(&csv_filename, title_to_name_mapping) {
         Ok(_) => {
             println!("✅ CSV file created: {csv_filename}");
         }

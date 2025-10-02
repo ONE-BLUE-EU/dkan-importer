@@ -1,4 +1,4 @@
-use dkan_importer::utils::normalize_string;
+use importer_lib::utils::normalize_string;
 use proptest::prelude::*;
 use serde_json::json;
 
