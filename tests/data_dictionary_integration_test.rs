@@ -4,7 +4,7 @@
 //! with the normalization optimization.
 
 use dkan_importer::model::data_dictionary::DataDictionary;
-use serde_json::json;
+use importer_lib::serde_json::json;
 use std::collections::HashMap;
 
 #[cfg(test)]

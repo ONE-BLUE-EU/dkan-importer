@@ -1,6 +1,8 @@
+use importer_lib::anyhow;
+use importer_lib::reqwest::blocking::Client;
+use importer_lib::serde_json;
+use importer_lib::serde_json::{json, Value};
 use importer_lib::utils::{normalize_string, write_error_to_log};
-use reqwest::blocking::Client;
-use serde_json::{json, Value};
 use std::collections::HashMap;
 
 pub struct DataDictionary {
@@ -15,7 +17,7 @@ impl DataDictionary {
         base_url: &str,
         data_dictionary_id: &str,
         client: &Client,
-    ) -> Result<Self, anyhow::Error> {
+    ) -> Result<Self, importer_lib::anyhow::Error> {
         let url = format!("{base_url}/api/1/metastore/schemas/data-dictionary/items");
         let response = client
             .get(&url)

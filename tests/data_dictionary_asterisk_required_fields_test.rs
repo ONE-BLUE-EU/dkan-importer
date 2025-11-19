@@ -3,8 +3,7 @@
 //! Original values should be preserved (no cleaning of asterisks)
 
 use dkan_importer::model::data_dictionary::DataDictionary;
-use serde_json::json;
-
+use importer_lib::serde_json::json;
 mod common;
 
 #[test]

@@ -2,7 +2,7 @@
 //! Verifies that DataDictionary::new() now checks for duplicates during construction
 
 use dkan_importer::model::DataDictionary;
-use serde_json::json;
+use importer_lib::serde_json::json;
 
 // Mock test that simulates the constructor behavior
 // Since we can't easily mock the HTTP client in unit tests, we'll test the duplicate checking

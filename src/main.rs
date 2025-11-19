@@ -11,6 +11,7 @@ use dkan_importer::{
         upload_distribution_csv_file,
     },
 };
+use importer_lib::reqwest::blocking::Client;
 use importer_lib::{ExcelValidatorBuilder, ERRORS_LOG_FILE};
 use rpassword::prompt_password;
 
@@ -68,7 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Get password reference for reuse
     let password = arguments.password.unwrap();
-    let client = reqwest::blocking::Client::new();
+    let client = Client::new();
     let data_dictionary =
         DataDictionary::new(&arguments.base_url, &arguments.data_dictionary_id, &client)?;
     let json_schema = data_dictionary.to_json_schema()?;

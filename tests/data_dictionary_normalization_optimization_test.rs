@@ -4,7 +4,7 @@
 //! once during DataDictionary initialization works correctly and doesn't change behavior.
 
 use dkan_importer::model::data_dictionary::DataDictionary;
-use serde_json::json;
+use importer_lib::serde_json::json;
 use std::collections::HashMap;
 
 #[test]

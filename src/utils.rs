@@ -1,3 +1,7 @@
+use importer_lib::anyhow;
+use importer_lib::reqwest::blocking::multipart::{Form, Part};
+use importer_lib::reqwest::blocking::Client;
+use importer_lib::serde_json;
 use importer_lib::utils::{get_local_datetime_with_format, normalize_string};
 
 pub fn generate_unique_filename(dataset_id: &str, excel_sheet_name: &str) -> String {
@@ -13,7 +17,7 @@ pub fn upload_distribution_csv_file(
     csv_path: &str,
     username: &str,
     password: &str,
-    client: &reqwest::blocking::Client,
+    client: &Client,
 ) -> Result<String, anyhow::Error> {
     let csv_content = std::fs::read(csv_path)?;
     let filename = std::path::Path::new(csv_path)
@@ -22,9 +26,9 @@ pub fn upload_distribution_csv_file(
         .unwrap_or("data.csv");
 
     // Create multipart form with the CSV file
-    let form = reqwest::blocking::multipart::Form::new().part(
+    let form = Form::new().part(
         "csv",
-        reqwest::blocking::multipart::Part::bytes(csv_content)
+        Part::bytes(csv_content)
             .file_name(filename.to_string())
             .mime_str("text/csv")?,
     );
@@ -66,7 +70,7 @@ pub fn dataset_add_distribution(
     data_dictionary_url: &str,
     username: &str,
     password: &str,
-    client: &reqwest::blocking::Client,
+    client: &Client,
 ) -> Result<Option<String>, anyhow::Error> {
     // Step 1: Get the current dataset to ensure it exists and get its current state
     let endpoint_url = format!("{url}/api/1/metastore/schemas/dataset/items/{dataset_id}");
@@ -176,7 +180,7 @@ pub fn delete_remote_file(
     file_name: &str,
     username: &str,
     password: &str,
-    client: &reqwest::blocking::Client,
+    client: &Client,
 ) -> Result<(), anyhow::Error> {
     let endpoint_url = format!("{url}/api/importer/delete/{file_name}");
     let response = client

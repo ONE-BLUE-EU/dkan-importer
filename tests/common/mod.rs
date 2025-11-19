@@ -1,5 +1,6 @@
-use importer_lib::{ExcelValidator, ExcelValidatorBuilder};
-use serde_json::{json, Value};
+use importer_lib::serde_json::{json, Map, Value};
+use importer_lib::ExcelValidator;
+use importer_lib::ExcelValidatorBuilder;
 use std::collections::HashMap;
 
 /// Creates a basic test schema for testing purposes
@@ -40,13 +41,13 @@ pub fn create_test_schema() -> Value {
 /// with test schemas that are in JSON Schema format
 #[allow(dead_code)]
 fn convert_schema_to_dkan_format(schema: &Value) -> Value {
-    let mut dkan_format = serde_json::Map::new();
+    let mut dkan_format = Map::new();
 
     if let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) {
         let mut fields = Vec::new();
 
         for (property_name, property_schema) in properties {
-            let mut field = serde_json::Map::new();
+            let mut field = Map::new();
             field.insert("name".to_string(), json!(property_name));
             field.insert("title".to_string(), json!(property_name));
 

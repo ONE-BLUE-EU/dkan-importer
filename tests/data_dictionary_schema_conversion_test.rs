@@ -1,7 +1,7 @@
 //! Tests for DKAN schema conversion functionality
 
 use dkan_importer::model::DataDictionary;
-use serde_json::json;
+use importer_lib::serde_json::json;
 
 #[test]
 fn test_datetime_with_dkan_format() {

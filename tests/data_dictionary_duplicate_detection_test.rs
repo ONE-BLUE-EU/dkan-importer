@@ -2,7 +2,7 @@
 //! Tests for DataDictionary::check_duplicates static method
 
 use dkan_importer::model::DataDictionary;
-use serde_json::json;
+use importer_lib::serde_json::json;
 
 mod common;
 

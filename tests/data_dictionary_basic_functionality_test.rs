@@ -1,5 +1,5 @@
 use dkan_importer::model::data_dictionary::DataDictionary;
-use serde_json::json;
+use importer_lib::serde_json::json;
 
 #[test]
 fn test_title_used_as_property_name() {
