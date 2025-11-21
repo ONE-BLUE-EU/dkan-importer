@@ -12,14 +12,10 @@ rpassword = "7.4"
 importer-lib = { path = "../importer-lib" }
 
 
-
+# Optimization profiles for maximum runtime speed
 [profile.release]
-opt-level = 3
-lto = "fat"
-codegen-units = 1
-panic = "abort"
-strip = true
-overflow-checks = false    # Disable integer overflow checks (use carefully!)
-
-[profile.release.package."*"]
-opt-level = 3
+opt-level = 3              # Maximum optimization
+lto = "fat"                # Full Link Time Optimization for better inlining across crates
+codegen-units = 1          # Single codegen unit for better optimization (slower compile, faster runtime)
+strip = true               # Strip symbols from binary (smaller size)
+panic = "abort"            # Abort on panic instead of unwinding (smaller, faster)
