@@ -12,3 +12,14 @@ rpassword = "7.4"
 importer-lib = { path = "../importer-lib" }
 
 
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+overflow-checks = false    # Disable integer overflow checks (use carefully!)
+
+[profile.release.package."*"]
+opt-level = 3
