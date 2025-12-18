@@ -6,7 +6,7 @@ use importer_lib::utils::{get_local_datetime_with_format, normalize_string};
 
 pub fn generate_unique_filename(dataset_id: &str, excel_sheet_name: &str) -> String {
     let timestamp = get_local_datetime_with_format("%Y-%m-%d_%H-%M-%S");
-    let excel_sheet_name = normalize_string(excel_sheet_name);
+    let excel_sheet_name = normalize_string(excel_sheet_name).replace(" ", "_");
     let filename = format!("{excel_sheet_name}_{timestamp}_{dataset_id}.csv");
     return filename.to_lowercase();
 }
