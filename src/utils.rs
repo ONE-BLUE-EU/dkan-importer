@@ -198,3 +198,14 @@ pub fn delete_remote_file(
     println!("🧹 Previous CSV file successfully deleted: {file_name}");
     return Ok(());
 }
+
+mod tests {
+
+    #[test]
+    fn test_generate_unique_filename() {
+        let filename = super::generate_unique_filename("1234567890", "Test Sheet with Spaces");
+        assert!(!filename.contains(" "));
+        assert!(filename.contains("test_sheet_with_spaces"));
+        assert!(filename.ends_with(".csv"));
+    }
+}
