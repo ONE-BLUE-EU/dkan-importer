@@ -17,12 +17,14 @@ pub fn get_local_datetime_with_format(format: &str) -> String {
 }
 
 /// Parse a date string in various formats and return ISO format (YYYY-MM-DD)
+///
+/// Numeric dates are read day-first only. A month-first format would read `03/04/2024` as 3 April
+/// or 4 March depending on which format is tried first, so `08/28/2024` is rejected instead.
 pub fn parse_date_string(s: &str) -> Result<String> {
     // Try different date formats
     let formats = vec![
         "%Y-%m-%d", // ISO: 2024-08-28
         "%d/%m/%Y", // European: 28/08/2024
-        "%m/%d/%Y", // US: 08/28/2024
         "%Y/%m/%d", // Asian: 2024/08/28
         "%d-%m-%Y", // European with dashes: 28-08-2024
         "%Y.%m.%d", // Dots: 2024.08.28
@@ -40,6 +42,8 @@ pub fn parse_date_string(s: &str) -> Result<String> {
 }
 
 /// Parse a datetime string in various formats and return RFC 3339 format (YYYY-MM-DDTHH:MM:SSZ)
+///
+/// Numeric dates are read day-first only; see [`parse_date_string`].
 pub fn parse_datetime_string(s: &str) -> Result<String> {
     // Try different datetime formats
     let formats = vec![
@@ -47,7 +51,6 @@ pub fn parse_datetime_string(s: &str) -> Result<String> {
         "%Y-%m-%d %H:%M:%S", // ISO with space: 2024-08-28 15:30:00
         "%d/%m/%Y %H:%M:%S", // European: 28/08/2024 15:30:00
         "%d/%m/%Y %H:%M",    // European no seconds: 28/08/2024 15:30
-        "%m/%d/%Y %H:%M:%S", // US: 08/28/2024 15:30:00
         "%Y-%m-%d",          // Date only (add time): 2024-08-28
         "%d/%m/%Y",          // Date only: 28/08/2024
     ];

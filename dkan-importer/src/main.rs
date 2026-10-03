@@ -12,7 +12,7 @@ use dkan_importer::{
     },
 };
 use importer_lib::reqwest::blocking::Client;
-use importer_lib::{ExcelValidatorBuilder, ERRORS_LOG_FILE};
+use importer_lib::ExcelValidatorBuilder;
 use rpassword::prompt_password;
 
 #[derive(Parser)]
@@ -50,25 +50,22 @@ struct Args {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let arguments = {
-        let mut _args = Args::parse();
-        if _args.password.is_none() {
-            let _password = prompt_password("Password: ").expect("Failed to read password");
-            _args.password = Some(_password);
-        }
-        _args
-    };
+    let arguments = Args::parse();
 
-    // Validate the url. It must be https because we are using basic auth.
+    // Validate the url before asking for anything. It must be https because we are using basic auth.
     if !arguments.base_url.starts_with("https://") {
-        panic!(
+        return Err(format!(
             "The URL must be https. The provided URL is: {}",
             arguments.base_url
-        );
+        )
+        .into());
     }
 
-    // Get password reference for reuse
-    let password = arguments.password.unwrap();
+    let password = match arguments.password {
+        Some(password) => password,
+        None => prompt_password("Password: ")
+            .map_err(|e| format!("Failed to read the password: {e}"))?,
+    };
     let client = Client::new();
     let data_dictionary =
         DataDictionary::new(&arguments.base_url, &arguments.data_dictionary_id, &client)?;
@@ -78,36 +75,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut validator =
         ExcelValidatorBuilder::new(&arguments.excel_file, &arguments.sheet_name, json_schema)
             .build()?;
-    match validator.validate_excel() {
-        Ok(_) => {
-            if validator.validation_reports.is_empty() {
-                println!("✅ Validation completed!");
-            } else {
-                println!(
-                    "❌ Validation failed with {} errors",
-                    validator.validation_reports.len()
-                );
-                eprintln!("❌ Check {} for details.", ERRORS_LOG_FILE);
-                std::process::exit(1);
-            }
-        }
-        Err(e) => {
-            eprintln!("❌ Validation failed with error: {e}");
-            eprintln!("❌ Check {} for details.", ERRORS_LOG_FILE);
-            std::process::exit(1);
-        }
+    if let Err(e) = validator.validate_excel() {
+        // The error says whether the details are in the error log or in the message itself
+        eprintln!("❌ {e}");
+        std::process::exit(1);
     }
+    println!("✅ Validation completed!");
 
     let csv_filename = generate_unique_filename(&arguments.dataset_id, &arguments.sheet_name);
     // Create a csv since the validation is successful. Use schema-aware parsing for proper date formatting.
-    match validator.export_to_csv(&csv_filename, title_to_name_mapping) {
-        Ok(_) => {
-            println!("✅ CSV file created: {csv_filename}");
-        }
-        Err(e) => {
-            panic!("❌ Failed to create CSV with error: {e}");
-        }
-    }
+    validator
+        .export_to_csv(&csv_filename, title_to_name_mapping)
+        .map_err(|e| format!("❌ Failed to create CSV with error: {e}"))?;
+    println!("✅ CSV file created: {csv_filename}");
 
     let file_url = upload_distribution_csv_file(
         &arguments.base_url,

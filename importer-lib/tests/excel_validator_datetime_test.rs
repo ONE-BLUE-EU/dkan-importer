@@ -234,7 +234,6 @@ fn test_date_string_conversion_to_datetime_format() {
     // Test various date formats being converted to RFC 3339 datetime (with Z for UTC)
     let test_cases = vec![
         ("28/08/2024", "2024-08-28T00:00:00Z"), // European format
-        ("08/28/2024", "2024-08-28T00:00:00Z"), // US format
         ("2024-08-28", "2024-08-28T00:00:00Z"), // ISO date
         ("2024/08/28", "2024-08-28T00:00:00Z"), // Asian format
         ("28-08-2024", "2024-08-28T00:00:00Z"), // European with dashes

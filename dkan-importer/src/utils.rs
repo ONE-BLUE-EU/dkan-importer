@@ -50,7 +50,9 @@ pub fn upload_distribution_csv_file(
         let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
         let file_url = response_json["data"]["file_url"]
             .as_str()
-            .expect("File URL not found")
+            .ok_or_else(|| {
+                anyhow::anyhow!("The upload response has no data.file_url: {response_text}")
+            })?
             .to_string();
         Ok(file_url)
     } else {
@@ -199,6 +201,7 @@ pub fn delete_remote_file(
     return Ok(());
 }
 
+#[cfg(test)]
 mod tests {
 
     #[test]

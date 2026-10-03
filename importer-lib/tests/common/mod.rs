@@ -130,3 +130,54 @@ pub fn create_test_title_to_name_mapping() -> HashMap<String, String> {
 
     mapping
 }
+
+// =============================================================================
+// Excel file helpers - for tests that go through the real file pipeline
+// =============================================================================
+
+/// A cell to write into a test workbook
+#[allow(dead_code)]
+pub enum Cell {
+    Text(&'static str),
+    Number(f64),
+    Empty,
+    /// An Excel error value such as "#N/A", stored as the cached result of a formula
+    Error(&'static str),
+}
+
+/// Write `rows` (the first row being the headers) to a sheet named "Sheet1" in a new workbook
+/// under the system temp directory, and return its path. `name` must be unique per test.
+#[allow(dead_code)]
+pub fn write_test_workbook(name: &str, rows: &[Vec<Cell>]) -> std::path::PathBuf {
+    use rust_xlsxwriter::{Formula, Workbook};
+
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet.set_name("Sheet1").unwrap();
+    for (row_idx, row) in rows.iter().enumerate() {
+        for (col_idx, cell) in row.iter().enumerate() {
+            let (r, c) = (row_idx as u32, col_idx as u16);
+            match cell {
+                Cell::Text(s) => {
+                    worksheet.write_string(r, c, *s).unwrap();
+                }
+                Cell::Number(n) => {
+                    worksheet.write_number(r, c, *n).unwrap();
+                }
+                Cell::Empty => {}
+                Cell::Error(e) => {
+                    worksheet
+                        .write_formula(r, c, Formula::new("=NA()").set_result(*e))
+                        .unwrap();
+                }
+            }
+        }
+    }
+    let path = std::env::temp_dir().join(format!(
+        "importer-lib-test-{}-{}.xlsx",
+        name,
+        std::process::id()
+    ));
+    workbook.save(&path).unwrap();
+    path
+}

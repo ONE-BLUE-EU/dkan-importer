@@ -67,7 +67,7 @@ mod tests {
     #[test]
     fn test_serde_json_value_to_string_floats() {
         assert_eq!(serde_json_value_to_string(&json!(12.43033)), "12.430330");
-        assert_eq!(serde_json_value_to_string(&json!(3.14)), "3.140000");
+        assert_eq!(serde_json_value_to_string(&json!(2.5)), "2.500000");
         assert_eq!(serde_json_value_to_string(&json!(1.1)), "1.100000");
     }
 }

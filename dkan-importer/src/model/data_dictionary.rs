@@ -22,9 +22,14 @@ impl DataDictionary {
         let response = client
             .get(&url)
             .header("Accept", "application/json")
-            .header("Authorization", "Bearer <token>")
             .send()?;
+        let status = response.status();
         let body = response.text()?;
+        if !status.is_success() {
+            return Err(anyhow::anyhow!(
+                "Failed to fetch the data dictionaries from {url}: HTTP {status}: {body}"
+            ));
+        }
 
         // Parse the response as an array of schema objects
         let schemas: Vec<Value> = serde_json::from_str(&body)?;
@@ -68,15 +73,14 @@ impl DataDictionary {
         Self::check_duplicates(&normalized_fields)?;
 
         return Ok(DataDictionary {
-            id: matching_schema
-                .get("identifier")
-                .and_then(|identifier| identifier.as_str())
-                .expect("Data dictionary identifier not found")
-                .to_string(),
+            // The schema was matched on this identifier above
+            id: data_dictionary_id.to_string(),
             name: data
                 .get("title")
                 .and_then(|name| name.as_str())
-                .expect("Data dictionary title not found")
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Data dictionary '{data_dictionary_id}' has no title")
+                })?
                 .to_string(),
             fields: normalized_fields,
             url: data_dictionary_url,
@@ -441,7 +445,15 @@ impl DataDictionary {
             );
 
             // Write duplicate check errors to the log file
-            write_error_to_log("Data Dictionary Duplicate Check Error", &full_message);
+            if let Err(e) =
+                write_error_to_log("Data Dictionary Duplicate Check Error", &full_message)
+            {
+                return Err(anyhow::anyhow!(
+                    "{}\n(The error log could not be written: {})",
+                    full_message,
+                    e
+                ));
+            }
 
             Err(anyhow::anyhow!(full_message))
         }

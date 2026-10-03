@@ -7,9 +7,17 @@ use thiserror::Error;
 
 use crate::utils::{normalize_string, write_error_to_log};
 
-/// Default placeholder for numeric fields to hint DKAN about expected precision
-/// This will result in DECIMAL(18, 6) - 18 total digits with 6 decimal places
+/// Written in place of an empty Number cell in the exported CSV.
+///
+/// Deliberate, despite turning a missing value into a 0 in DKAN: DKAN infers column types from the
+/// CSV contents, and this value makes it create DECIMAL(18, 6) - 18 total digits with 6 decimal
+/// places - rather than a text column. Pinned by
+/// `empty_numeric_cells_are_exported_as_dkan_type_placeholders` in `tests/excel_file_pipeline_test.rs`.
 const NUMERIC_PLACEHOLDER: &str = "000000000000.000000";
+
+/// Written in place of an empty Integer cell in the exported CSV, for the same reason as
+/// [`NUMERIC_PLACEHOLDER`].
+const INTEGER_PLACEHOLDER: &str = "0";
 
 /// Type alias for a parsed Excel row with row number and field data
 pub type ParsedExcelRow = (usize, Map<String, Value>);
@@ -108,7 +116,6 @@ pub struct FieldSchema {
     pub maximum: Option<f64>,
     pub min_length: Option<usize>,
     pub max_length: Option<usize>,
-    pub multiple_of: Option<f64>,
 }
 
 pub struct ExcelValidator {
@@ -183,7 +190,7 @@ impl ExcelValidatorBuilder {
 
 impl ExcelValidator {
     //////////////////////////////////////////////////////////////
-    ///  Public API
+    //  Public API
     //////////////////////////////////////////////////////////////
 
     /// Create a test instance of ExcelValidator (for testing only)
@@ -245,17 +252,28 @@ impl ExcelValidator {
         // Log validation errors using centralized logging if there are any errors
         if !self.validation_reports.is_empty() {
             let validation_report = self.format_validation_report();
-            write_error_to_log("Excel Validation Error Report", &validation_report);
-
-            // Return error if validation failed
-            return Err(anyhow::anyhow!(
-                "Excel validation failed with {} error(s) across {} row(s). Check the error log for details.",
+            let summary = format!(
+                "Excel validation failed with {} error(s) across {} row(s).",
                 self.validation_reports
                     .iter()
                     .map(|r| r.errors.len())
                     .sum::<usize>(),
                 self.validation_reports.len()
-            ));
+            );
+
+            // Return error if validation failed. If the log cannot be written, carry the details
+            // in the error itself rather than pointing the user at a log that lacks them.
+            return Err(
+                match write_error_to_log("Excel Validation Error Report", &validation_report) {
+                    Ok(()) => anyhow::anyhow!("{} Check the error log for details.", summary),
+                    Err(e) => anyhow::anyhow!(
+                        "{} The error log could not be written ({}), so the details follow:\n{}",
+                        summary,
+                        e,
+                        validation_report
+                    ),
+                },
+            );
         }
 
         Ok(())
@@ -376,12 +394,12 @@ impl ExcelValidator {
                         Value::Number(n) => n.to_string(),
                         Value::Bool(b) => b.to_string(),
                         Value::Null => {
-                            // For numeric fields, use 0.0 instead of empty string to help DKAN type inference
+                            // Numeric columns get a type placeholder - see NUMERIC_PLACEHOLDER.
                             // Look up field schema using the original Excel header (title)
                             if let Some(field_schema) = self.field_schemas.get(header) {
                                 match &field_schema.field_type {
                                     SchemaType::Number => NUMERIC_PLACEHOLDER.to_string(),
-                                    SchemaType::Integer => "0".to_string(),
+                                    SchemaType::Integer => INTEGER_PLACEHOLDER.to_string(),
                                     SchemaType::Mixed(types) => {
                                         // For mixed types (like [Number, Null]), check if it contains Number or Integer
                                         if types.iter().any(|t| matches!(t, SchemaType::Number)) {
@@ -390,7 +408,7 @@ impl ExcelValidator {
                                             .iter()
                                             .any(|t| matches!(t, SchemaType::Integer))
                                         {
-                                            "0".to_string()
+                                            INTEGER_PLACEHOLDER.to_string()
                                         } else {
                                             String::new()
                                         }
@@ -428,7 +446,7 @@ impl ExcelValidator {
     }
 
     //////////////////////////////////////////////////////////////
-    ///  Private methods
+    //  Private methods
     //////////////////////////////////////////////////////////////
     /// Extract field schemas from JSON schema for intelligent type coercion
     fn extract_field_schemas(schema: &Value) -> Result<HashMap<String, FieldSchema>> {
@@ -436,9 +454,9 @@ impl ExcelValidator {
 
         if let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) {
             for (field_name, field_schema) in properties {
-                if let Ok(parsed_schema) = Self::parse_field_schema(field_schema) {
-                    field_schemas.insert(field_name.clone(), parsed_schema);
-                }
+                let parsed_schema = Self::parse_field_schema(field_schema)
+                    .with_context(|| format!("Invalid schema for field \"{}\"", field_name))?;
+                field_schemas.insert(field_name.clone(), parsed_schema);
             }
         }
 
@@ -475,8 +493,6 @@ impl ExcelValidator {
             .and_then(|m| m.as_u64())
             .map(|n| n as usize);
 
-        let multiple_of = schema.get("multipleOf").and_then(|m| m.as_f64());
-
         Ok(FieldSchema {
             field_type,
             format,
@@ -486,7 +502,6 @@ impl ExcelValidator {
             maximum,
             min_length,
             max_length,
-            multiple_of,
         })
     }
 
@@ -554,6 +569,8 @@ impl ExcelValidator {
 
         let mut headers: Vec<String> = Vec::new();
         let mut parsed_rows: Vec<ParsedExcelRow> = Vec::new();
+        // Excel error values (#N/A, #DIV/0!, ...) are broken cells, not data: collect them all
+        let mut error_cells: Vec<String> = Vec::new();
 
         // Process each row
         for (row_index, row) in range.rows().enumerate() {
@@ -586,14 +603,27 @@ impl ExcelValidator {
             // Convert row to JSON object with intelligent type coercion
             let mut json_obj = Map::new();
             for (col_idx, cell) in row.iter().enumerate() {
-                if col_idx < headers.len() {
-                    let header = &headers[col_idx];
-                    let value = self.convert_cell_to_json_with_schema_awareness(cell, header);
-                    json_obj.insert(header.clone(), value);
+                let Some(header) = headers.get(col_idx) else {
+                    continue;
+                };
+                if let Data::Error(e) = cell {
+                    error_cells.push(format!("row {}, column '{}': {}", row_index + 1, header, e));
+                    continue;
                 }
+                let value = self.convert_cell_to_json_with_schema_awareness(cell, header);
+                json_obj.insert(header.clone(), value);
             }
 
             parsed_rows.push((row_index + 1, json_obj));
+        }
+
+        if !error_cells.is_empty() {
+            return Err(anyhow::anyhow!(
+                "The sheet \"{}\" contains {} Excel error value(s). Fix these cells and try again:\n  {}",
+                self.sheet_name,
+                error_cells.len(),
+                error_cells.join("\n  ")
+            ));
         }
 
         Ok((headers, parsed_rows))
@@ -716,12 +746,11 @@ impl ExcelValidator {
             if let Some(field_schema) = self.field_schemas.get(field_name) {
                 match &field_schema.field_type {
                     SchemaType::Null => return Value::Null,
-                    SchemaType::Mixed(types) => {
+                    SchemaType::Mixed(types)
                         // If it's a union type that includes null, prefer null for empty strings
-                        if types.contains(&SchemaType::Null) {
+                        if types.contains(&SchemaType::Null) => {
                             return Value::Null;
                         }
-                    }
                     _ => {}
                 }
             }
@@ -739,12 +768,11 @@ impl ExcelValidator {
                             SchemaType::Number | SchemaType::Integer => {
                                 return json!(parsed_lat);
                             }
-                            SchemaType::Mixed(types) => {
-                                if types.contains(&SchemaType::Number)
-                                    || types.contains(&SchemaType::Integer)
-                                {
-                                    return json!(parsed_lat);
-                                }
+                            SchemaType::Mixed(types)
+                                if (types.contains(&SchemaType::Number)
+                                    || types.contains(&SchemaType::Integer)) =>
+                            {
+                                return json!(parsed_lat);
                             }
                             _ => {}
                         }
@@ -776,12 +804,11 @@ impl ExcelValidator {
                             SchemaType::Number | SchemaType::Integer => {
                                 return json!(parsed_lng);
                             }
-                            SchemaType::Mixed(types) => {
-                                if types.contains(&SchemaType::Number)
-                                    || types.contains(&SchemaType::Integer)
-                                {
-                                    return json!(parsed_lng);
-                                }
+                            SchemaType::Mixed(types)
+                                if (types.contains(&SchemaType::Number)
+                                    || types.contains(&SchemaType::Integer)) =>
+                            {
+                                return json!(parsed_lng);
                             }
                             _ => {}
                         }
@@ -845,15 +872,7 @@ impl ExcelValidator {
 
             SchemaType::Number => {
                 // Use smart number conversion that prefers integers
-                if let Some(mut num_val) = self.smart_number_conversion(s) {
-                    // Apply multipleOf rounding if specified
-                    if let Some(multiple_of) = field_schema.multiple_of
-                        && let Some(num_f64) = num_val.as_f64()
-                    {
-                        let rounded = self.apply_multiple_of_rounding(num_f64, multiple_of);
-                        num_val = json!(rounded);
-                    }
-
+                if let Some(num_val) = self.smart_number_conversion(s) {
                     // Check bounds if specified
                     if let (Some(min), Some(max)) = (field_schema.minimum, field_schema.maximum) {
                         if let Some(num_f64) = num_val.as_f64()
@@ -982,7 +1001,6 @@ impl ExcelValidator {
                             maximum: field_schema.maximum,
                             min_length: field_schema.min_length,
                             max_length: field_schema.max_length,
-                            multiple_of: field_schema.multiple_of,
                         };
 
                         let converted = self.coerce_string_to_schema_type(s, &test_schema);
@@ -1017,7 +1035,6 @@ impl ExcelValidator {
                             maximum: field_schema.maximum,
                             min_length: field_schema.min_length,
                             max_length: field_schema.max_length,
-                            multiple_of: field_schema.multiple_of,
                         };
 
                         let converted = self.coerce_string_to_schema_type(s, &test_schema);
@@ -1059,12 +1076,10 @@ impl ExcelValidator {
     fn convert_string_by_format(&self, s: &str, format: &str) -> Value {
         match format {
             "date" => {
-                // Try various date formats
-                if self.looks_like_date(s) {
-                    // Normalize date format
-                    if let Ok(parsed_date) = self.parse_date_string(s) {
-                        return Value::String(parsed_date);
-                    }
+                // Normalize to YYYY-MM-DD; anything unparseable is reported by
+                // custom_validator_date_formats
+                if let Ok(parsed_date) = self.parse_date_string(s) {
+                    return Value::String(parsed_date);
                 }
                 Value::String(s.to_string())
             }
@@ -1253,85 +1268,7 @@ impl ExcelValidator {
         crate::utils::parse_time_string(s)
     }
 
-    /// Apply automatic rounding based on multipleOf constraint using integer arithmetic
-    /// Rounds to the nearest exact multiple to ensure jsonschema validation passes
-    fn apply_multiple_of_rounding(&self, value: f64, multiple_of: f64) -> f64 {
-        if multiple_of <= 0.0 {
-            return value;
-        }
-
-        // For small decimal multipleOf values, use integer arithmetic to avoid floating-point errors
-        if multiple_of < 1.0 {
-            let decimal_places = (-multiple_of.log10()).ceil().max(0.0) as u32;
-            let scale = 10_i64.pow(decimal_places);
-
-            // Convert to scaled integers
-            let value_scaled = (value * scale as f64).round() as i64;
-            let multiple_scaled = (multiple_of * scale as f64).round() as i64;
-
-            if multiple_scaled == 0 {
-                return value;
-            }
-
-            // Perform integer division and rounding
-            let quotient = (value_scaled as f64) / (multiple_scaled as f64);
-            let rounded_quotient = quotient.round() as i64;
-            let rounded_scaled = rounded_quotient * multiple_scaled;
-
-            // Convert back to float with exact precision
-            (rounded_scaled as f64) / (scale as f64)
-        } else {
-            // For values >= 1, use simple rounding
-            (value / multiple_of).round() * multiple_of
-        }
-    }
-
-    /// Normalize all numeric values in a row by applying multipleOf rounding
-    /// This ensures values pass jsonschema validation without floating-point precision errors
-    fn normalize_numeric_values_for_validation(&self, row_value: &Value) -> Value {
-        if let Some(obj) = row_value.as_object() {
-            let mut normalized = Map::new();
-
-            for (field_name, value) in obj {
-                // Check if this field has a multipleOf constraint
-                let normalized_value =
-                    if let Some(field_schema) = self.field_schemas.get(field_name) {
-                        if let Some(multiple_of) = field_schema.multiple_of {
-                            // Apply rounding to numeric values
-                            if let Some(num) = value.as_f64() {
-                                let rounded = self.apply_multiple_of_rounding(num, multiple_of);
-
-                                // Create JSON value from formatted string to preserve exact decimal representation
-                                let decimal_places = (-multiple_of.log10()).ceil().max(0.0) as u32;
-                                let formatted =
-                                    format!("{:.prec$}", rounded, prec = decimal_places as usize);
-
-                                // Parse the string as a serde_json::Number to preserve exact decimal
-                                if let Ok(num_value) = formatted.parse::<serde_json::Number>() {
-                                    Value::Number(num_value)
-                                } else {
-                                    json!(rounded)
-                                }
-                            } else {
-                                value.clone()
-                            }
-                        } else {
-                            value.clone()
-                        }
-                    } else {
-                        value.clone()
-                    };
-
-                normalized.insert(field_name.clone(), normalized_value);
-            }
-
-            Value::Object(normalized)
-        } else {
-            row_value.clone()
-        }
-    }
-
-    /// Convert numeric cell value to appropriate JSON type with automatic rounding for multipleOf
+    /// Convert numeric cell value to appropriate JSON type
     pub(crate) fn convert_numeric_with_validation(&self, f: f64, field_name: &str) -> Value {
         // Handle special float values
         if f.is_nan() || f.is_infinite() {
@@ -1340,12 +1277,6 @@ impl ExcelValidator {
 
         // Check if this is a latitude or longitude field and parse coordinates
         let field_name_lower = field_name.to_lowercase();
-        let is_coordinate_field = field_name_lower.contains("latitude")
-            || field_name_lower.contains("lat")
-            || field_name_lower.contains("longitude")
-            || field_name_lower.contains("lng")
-            || field_name_lower.contains("lon");
-
         let value = if field_name_lower.contains("latitude") || field_name_lower.contains("lat") {
             // Process latitude through coordinate parser
             let lat_str = f.to_string();
@@ -1383,20 +1314,6 @@ impl ExcelValidator {
             f
         };
 
-        // For coordinates, skip rounding and use as-is
-        // For other fields, apply automatic rounding if multipleOf constraint exists
-        let value = if is_coordinate_field {
-            value
-        } else if let Some(field_schema) = self.field_schemas.get(field_name) {
-            if let Some(multiple_of) = field_schema.multiple_of {
-                self.apply_multiple_of_rounding(value, multiple_of)
-            } else {
-                value
-            }
-        } else {
-            value
-        };
-
         // Value is valid - convert to appropriate JSON type
         if (value.fract().abs() < f64::EPSILON)
             && value >= i64::MIN as f64
@@ -1415,13 +1332,10 @@ impl ExcelValidator {
     ) -> Vec<ValidationError> {
         let mut errors = Vec::new();
 
-        // Apply multipleOf rounding to all numeric fields before validation
-        let normalized_row = self.normalize_numeric_values_for_validation(row_value);
-
         // 1. Standard JSON Schema validation via jsonschema library
         let jsonschema_errors: Vec<ValidationError> = self
             .validator
-            .iter_errors(&normalized_row)
+            .iter_errors(row_value)
             .map(|error| {
                 let path = if error.instance_path().to_string().is_empty() {
                     format!("row[{}]", row_number)
@@ -1430,7 +1344,7 @@ impl ExcelValidator {
                 };
 
                 // Map jsonschema's ValidationErrorKind to our explicit error types
-                self.map_jsonschema_error_kind(&error, &path, &normalized_row)
+                self.map_jsonschema_error_kind(&error, &path, row_value)
             })
             .filter(|error| {
                 // Filter out floating-point precision noise errors
@@ -1447,12 +1361,14 @@ impl ExcelValidator {
         errors.extend(jsonschema_errors);
 
         // 2. Custom Business Rule: Fields ending with '*' are ALWAYS required
-        let asterisk_errors =
-            self.custom_validator_asterisk_required_fields(&normalized_row, row_number);
+        let asterisk_errors = self.custom_validator_asterisk_required_fields(row_value, row_number);
         errors.extend(asterisk_errors);
 
-        // 3. Future custom validators can be added here
-        // errors.extend(self.validate_cross_field_dependencies(&normalized_row, row_number));
+        // 3. Custom Business Rule: "date" and "date-time" values must have been parsed
+        errors.extend(self.custom_validator_date_formats(row_value, row_number));
+
+        // 4. Future custom validators can be added here
+        // errors.extend(self.validate_cross_field_dependencies(row_value, row_number));
 
         errors
     }
@@ -1518,6 +1434,41 @@ impl ExcelValidator {
         }
 
         errors
+    }
+
+    /// Custom validator: values of "date" and "date-time" fields must be real dates
+    ///
+    /// Cell conversion normalizes every date it can parse (to `YYYY-MM-DD` or RFC 3339) and leaves
+    /// anything else as the original text. The JSON Schema validator does not assert formats, so
+    /// without this check text such as `n/a` or a month-first `08/28/2024` would be uploaded
+    /// as-is into a date column.
+    fn custom_validator_date_formats(
+        &self,
+        data: &Value,
+        row_number: usize,
+    ) -> Vec<ValidationError> {
+        let Some(row) = data.as_object() else {
+            return Vec::new();
+        };
+
+        row.iter()
+            .filter_map(|(field_name, value)| {
+                let s = value.as_str().filter(|s| !s.is_empty())?;
+                let format = self.field_schemas.get(field_name)?.format.as_deref()?;
+                let is_valid = match format {
+                    "date" => chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok(),
+                    "date-time" => chrono::DateTime::parse_from_rfc3339(s).is_ok(),
+                    _ => return None,
+                };
+                (!is_valid).then(|| ValidationError::InvalidFormat {
+                    path: format!("row[{}]./{}", row_number, field_name),
+                    message: format!(
+                        "'{}' is not a valid {}. Numeric dates must be day/month/year or year-month-day",
+                        s, format
+                    ),
+                })
+            })
+            .collect()
     }
 
     /// Map jsonschema's ValidationErrorKind to our explicit ValidationError types
@@ -1855,7 +1806,14 @@ impl ExcelValidator {
             );
 
             // Write duplicate check errors to the log file
-            write_error_to_log("Excel Header Duplicate Check Error", &full_message);
+            if let Err(e) = write_error_to_log("Excel Header Duplicate Check Error", &full_message)
+            {
+                return Err(anyhow::anyhow!(
+                    "{}\n(The error log could not be written: {})",
+                    full_message,
+                    e
+                ));
+            }
 
             Err(anyhow::anyhow!(full_message))
         }
@@ -2065,7 +2023,7 @@ mod tests {
 
         let report = &validator.validation_reports[0];
         assert!(
-            report.errors.len() > 0,
+            !report.errors.is_empty(),
             "Should have validation errors for type mismatch"
         );
     }
@@ -3056,35 +3014,6 @@ mod tests {
     //////////////////////////////////////////////////////////////
     // ExcelValidatorBuilder tests
     //////////////////////////////////////////////////////////////
-
-    #[test]
-    fn test_builder_creates_validator_with_cached_data() {
-        use crate::ExcelValidatorBuilder;
-
-        // This test would require a real Excel file, so we'll just verify the API exists
-        // and compiles correctly. The builder pattern ensures data is processed only once.
-        let schema = create_test_schema();
-
-        // Verify that the builder API is available and has the expected methods
-        let _builder = ExcelValidatorBuilder::new("test.xlsx", "Sheet1", schema);
-        // In a real scenario: let mut validator = builder.build()?;
-        // Then: validator.validate_excel()? and validator.export_to_csv(...)?
-        // would reuse the cached headers and rows
-    }
-
-    #[test]
-    fn test_accessor_methods() {
-        // Test that accessor methods exist and can be called
-        let _validator = create_excel_validator_with_defaults(&create_test_schema());
-
-        // These methods should exist on ExcelValidator
-        // In practice, they would return the headers/rows after processing
-        // let headers = validator.headers()?;
-        // let rows = validator.rows()?;
-
-        // This test verifies the API compiles and exists
-        assert!(true, "Accessor methods exist on ExcelValidator");
-    }
 
     // looks like date test
     #[test]

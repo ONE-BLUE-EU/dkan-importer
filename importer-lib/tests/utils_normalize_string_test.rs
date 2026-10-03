@@ -262,7 +262,7 @@ fn test_integration_with_schema_validation() -> anyhow::Result<()> {
     let validator = common::create_test_validator_with_schema(&schema);
 
     // Test that normalized headers would create valid JSON
-    let normalized_headers = vec![
+    let normalized_headers = [
         normalize_string("Date of sampling start*"),
         normalize_string("Name of sea*"),
         normalize_string("Remark 1\nAnalytical Partner"),

@@ -1,0 +1,13 @@
+[package]
+name = "unpivoter"
+version.workspace = true
+edition = "2024"
+
+[[bin]]
+name = "upr"
+path = "src/main.rs"
+
+[dependencies]
+calamine.workspace = true
+clap.workspace = true
+rust_xlsxwriter.workspace = true
