@@ -1,0 +1,38 @@
+[workspace]
+resolver = "3"
+members = ["importer-lib", "dkan-importer", "pivoter"]
+
+[workspace.package]
+version = "0.1.0"
+
+[workspace.dependencies]
+# Internal crates
+importer-lib = { path = "importer-lib" }
+
+# Excel reader / writer
+calamine = "0.36"
+rust_xlsxwriter = "0.99"
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+thiserror = "2.0"
+csv = "1.4"
+jsonschema = "0.58"
+reqwest = { version = "0.13", features = ["json", "multipart", "blocking"] }
+log = "0.4"
+loose-dms = "0.1"
+clap = { version = "4.6", features = ["derive"] }
+rpassword = "7.5"
+
+# Dev dependencies
+proptest = "1.9"
+
+# Optimization profiles for maximum runtime speed
+[profile.release]
+opt-level = 3              # Maximum optimization
+lto = "fat"                # Full Link Time Optimization for better inlining across crates
+codegen-units = 1          # Single codegen unit for better optimization (slower compile, faster runtime)
+strip = true               # Strip symbols from binary (smaller size)
+panic = "abort"            # Abort on panic instead of unwinding (smaller, faster)

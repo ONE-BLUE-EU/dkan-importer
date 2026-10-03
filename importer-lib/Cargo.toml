@@ -1,6 +1,6 @@
 [package]
 name = "importer-lib"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 
 [features]
@@ -9,37 +9,29 @@ test = []
 
 [dependencies]
 # Excel reader
-calamine = "0.32"
+calamine.workspace = true
 # Excel writer
-rust_xlsxwriter = "0.92"
+rust_xlsxwriter.workspace = true
 
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-chrono = { version = "0.4", features = ["serde"] }
-anyhow = "1.0"
-thiserror = "2.0"
-csv = "1.4"
-jsonschema = "0.37"
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+csv.workspace = true
+jsonschema.workspace = true
 
 # For re-exporting
-reqwest = { version = "0.12", features = ["json", "multipart", "blocking"] }
-log = "0.4"
-loose-dms = "0.1"
+reqwest.workspace = true
+log.workspace = true
+loose-dms.workspace = true
 
 
 [dev-dependencies]
-proptest = "1.9"
+proptest.workspace = true
 
 # Automatically enable test feature during testing
 # This ensures test_utils is only compiled when running tests
 [dev-dependencies.importer-lib]
 path = "."
 features = ["test"]
-
-# Optimization profiles for maximum runtime speed
-[profile.release]
-opt-level = 3              # Maximum optimization
-lto = "fat"                # Full Link Time Optimization for better inlining across crates
-codegen-units = 1          # Single codegen unit for better optimization (slower compile, faster runtime)
-strip = true               # Strip symbols from binary (smaller size)
-panic = "abort"            # Abort on panic instead of unwinding (smaller, faster)
