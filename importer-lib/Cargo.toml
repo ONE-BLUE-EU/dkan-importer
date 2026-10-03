@@ -1,0 +1,45 @@
+[package]
+name = "importer-lib"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+# Feature flag for test utilities (automatically enabled during testing)
+test = []
+
+[dependencies]
+# Excel reader
+calamine = "0.32"
+# Excel writer
+rust_xlsxwriter = "0.92"
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+thiserror = "2.0"
+csv = "1.4"
+jsonschema = "0.37"
+
+# For re-exporting
+reqwest = { version = "0.12", features = ["json", "multipart", "blocking"] }
+log = "0.4"
+loose-dms = "0.1"
+
+
+[dev-dependencies]
+proptest = "1.9"
+
+# Automatically enable test feature during testing
+# This ensures test_utils is only compiled when running tests
+[dev-dependencies.importer-lib]
+path = "."
+features = ["test"]
+
+# Optimization profiles for maximum runtime speed
+[profile.release]
+opt-level = 3              # Maximum optimization
+lto = "fat"                # Full Link Time Optimization for better inlining across crates
+codegen-units = 1          # Single codegen unit for better optimization (slower compile, faster runtime)
+strip = true               # Strip symbols from binary (smaller size)
+panic = "abort"            # Abort on panic instead of unwinding (smaller, faster)

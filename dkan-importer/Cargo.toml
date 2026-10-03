@@ -1,0 +1,21 @@
+[package]
+name = "dkan-importer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
+rpassword = "7.4"
+
+# Common lib
+importer-lib = { path = "../importer-lib" }
+
+
+# Optimization profiles for maximum runtime speed
+[profile.release]
+opt-level = 3              # Maximum optimization
+lto = "fat"                # Full Link Time Optimization for better inlining across crates
+codegen-units = 1          # Single codegen unit for better optimization (slower compile, faster runtime)
+strip = true               # Strip symbols from binary (smaller size)
+panic = "abort"            # Abort on panic instead of unwinding (smaller, faster)
