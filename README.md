@@ -47,6 +47,10 @@ Code shared by the binaries:
 - `writers` contains the CSV and Excel output writers.
 - It re-exports `anyhow`, `log`, `reqwest`, `serde` and `serde_json`, so dependent crates use the same versions.
 
+## Engineering standards
+
+All work in this workspace follows [ENGINEERING_STANDARDS.md](ENGINEERING_STANDARDS.md) and [SECURITY.md](SECURITY.md). Both are adapted from the shared `engineering-standards-core` and keep only the rules that apply to these tools.
+
 ## Building
 
 All crates share one `target/` directory and one `Cargo.lock`. Dependency versions are declared once in the root [`Cargo.toml`](Cargo.toml) under `[workspace.dependencies]`, and each crate refers to them with `<crate>.workspace = true`. The release profile (fat LTO, one codegen unit, stripped binaries, `panic = "abort"`) is also set in the root manifest.
