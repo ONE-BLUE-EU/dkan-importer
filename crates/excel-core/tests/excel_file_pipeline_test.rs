@@ -37,7 +37,13 @@ fn headers() -> Vec<common::Cell> {
 fn run_pipeline(name: &str, rows: Vec<Vec<common::Cell>>) -> Result<Vec<String>, String> {
     let mut all_rows = vec![headers()];
     all_rows.extend(rows);
-    let xlsx = write_test_workbook(name, &all_rows);
+    run_sheet(name, &all_rows)
+}
+
+/// Validate and export `all_rows` (the first row being the headers); return the CSV lines, or the
+/// error.
+fn run_sheet(name: &str, all_rows: &[Vec<common::Cell>]) -> Result<Vec<String>, String> {
+    let xlsx = write_test_workbook(name, all_rows);
     let csv = xlsx.with_extension("csv");
 
     let result = (|| {
@@ -143,4 +149,119 @@ fn excel_error_cell_stops_the_import_and_names_the_cell() {
     assert!(err.contains("#N/A"), "{err}");
     assert!(err.contains("row 3"), "{err}");
     assert!(err.contains("Depth"), "{err}");
+}
+
+#[test]
+fn data_in_a_column_without_a_header_stops_the_import_and_names_the_column() {
+    let err = run_pipeline(
+        "unnamed-column",
+        vec![
+            vec![Text("S1"), Empty, Empty, Empty, Empty],
+            vec![Text("S2"), Empty, Empty, Empty, Empty, Text("Super dirty")],
+            vec![Text("S3"), Empty, Empty, Empty, Empty, Text("Too dirty")],
+        ],
+    )
+    .unwrap_err();
+
+    let expected = "column F (first value at row 3: \"Super dirty\")";
+    assert!(err.contains("without a header"), "{err}");
+    assert!(err.contains(expected), "{err}");
+}
+
+#[test]
+fn every_column_without_a_header_that_has_data_is_reported() {
+    let err = run_sheet(
+        "unnamed-columns",
+        &[
+            vec![Text("Sample ID"), Empty, Text("Depth")],
+            vec![Text("S1"), Text("left"), Number(1.0), Empty, Number(7.0)],
+        ],
+    )
+    .unwrap_err();
+
+    assert!(
+        err.contains("column B (first value at row 2: \"left\")"),
+        "{err}"
+    );
+    assert!(
+        err.contains("column E (first value at row 2: \"7\")"),
+        "{err}"
+    );
+}
+
+/// Blank columns without a header (stray spaces, or formatting that stretches the sheet) carry no
+/// data, so they are dropped rather than reported as extra or duplicate columns. The columns after
+/// the gap must still line up with their own headers.
+#[test]
+fn blank_columns_without_a_header_are_ignored() {
+    let lines = run_sheet(
+        "blank-unnamed-columns",
+        &[
+            vec![
+                Text("Sample ID"),
+                Text("Depth"),
+                Empty,
+                Text("Count"),
+                Text("Notes"),
+                Text("Date"),
+                Text("  "),
+            ],
+            vec![
+                Text("S1"),
+                Number(1.5),
+                Text("   "),
+                Number(3.0),
+                Text("ok"),
+                Text("2024-01-02"),
+                Text(" "),
+            ],
+        ],
+    )
+    .unwrap();
+
+    let expected = vec!["Sample ID,Depth,Count,Notes,Date", "S1,1.5,3,ok,2024-01-02"];
+    assert_eq!(lines, expected);
+}
+
+/// The sheet's first used cell sets where its table starts; the column and row reported must be
+/// the ones Excel shows, not positions within the table.
+#[test]
+fn column_without_a_header_is_reported_by_its_sheet_position_when_the_table_is_not_at_a1() {
+    let err = run_sheet(
+        "unnamed-column-offset",
+        &[
+            vec![],
+            vec![Empty, Text("Sample ID")],
+            vec![Empty, Text("S1"), Text("Super dirty")],
+        ],
+    )
+    .unwrap_err();
+
+    assert!(
+        err.contains("column C (first value at row 3: \"Super dirty\")"),
+        "{err}"
+    );
+}
+
+/// With an empty first row the table starts at row 2; rows must still be reported by the number
+/// Excel shows.
+#[test]
+fn validation_errors_name_the_row_excel_shows_when_the_table_is_not_at_row_1() {
+    let mut rows = vec![vec![], headers()];
+    rows.push(vec![Text("S1"), Empty, Empty, Empty, Text("08/28/2024")]);
+    let err = run_sheet("validation-row-offset", &rows).unwrap_err();
+
+    let expected = "row[3]./Date";
+    assert!(err.contains("'08/28/2024' is not a valid date"), "{err}");
+    assert!(err.contains(expected), "{err}");
+}
+
+#[test]
+fn excel_error_cells_name_the_row_excel_shows_when_the_table_is_not_at_row_1() {
+    let mut rows = vec![vec![], headers()];
+    rows.push(vec![Text("S1"), Error("#N/A"), Empty, Empty, Empty]);
+    let err = run_sheet("error-cell-row-offset", &rows).unwrap_err();
+
+    let expected = "row 3, column 'Depth': #N/A";
+    assert!(err.contains(expected), "{err}");
 }

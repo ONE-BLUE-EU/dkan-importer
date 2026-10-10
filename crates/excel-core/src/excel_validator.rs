@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use calamine::{Data, Reader, Xlsx, open_workbook};
 use jsonschema::Validator;
 use serde_json::{Map, Value, json};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 
 use crate::utils::{normalize_string, write_error_to_log};
@@ -18,6 +18,9 @@ const NUMERIC_PLACEHOLDER: &str = "000000000000.000000";
 /// Written in place of an empty Integer cell in the exported CSV, for the same reason as
 /// [`NUMERIC_PLACEHOLDER`].
 const INTEGER_PLACEHOLDER: &str = "0";
+
+/// Number of columns in an Excel sheet (A to XFD).
+const EXCEL_MAX_COLUMNS: u32 = 16_384;
 
 /// Type alias for a parsed Excel row with row number and field data
 pub type ParsedExcelRow = (usize, Map<String, Value>);
@@ -567,19 +570,29 @@ impl ExcelValidator {
                 )
             })?;
 
+        // The range starts at the sheet's first used cell, which need not be A1. Only `None` for
+        // an empty sheet, which has no rows to locate.
+        let (first_row, first_col) = range.start().unwrap_or((0, 0));
+
+        // One entry per column; `None` for a column without a header
+        let mut columns: Vec<Option<String>> = Vec::new();
         let mut headers: Vec<String> = Vec::new();
         let mut parsed_rows: Vec<ParsedExcelRow> = Vec::new();
         // Excel error values (#N/A, #DIV/0!, ...) are broken cells, not data: collect them all
         let mut error_cells: Vec<String> = Vec::new();
+        // Data in a column without a header has no field to go to: the first value of each such
+        // column, by column index
+        let mut unnamed_columns_with_data: BTreeMap<usize, String> = BTreeMap::new();
 
         // Process each row
         for (row_index, row) in range.rows().enumerate() {
             if row_index == 0 {
                 // First row contains headers - normalize them to match DKAN titles
-                headers = row
+                columns = row
                     .iter()
-                    .map(|cell| normalize_string(&cell.to_string()))
+                    .map(|cell| Some(normalize_string(&cell.to_string())).filter(|h| !h.is_empty()))
                     .collect();
+                headers = columns.iter().flatten().cloned().collect();
 
                 log::debug!("Excel headers: {:#?}", headers);
 
@@ -589,32 +602,63 @@ impl ExcelValidator {
                 continue;
             }
 
+            // The row number Excel shows
+            let row_number = usize::try_from(first_row)
+                .unwrap_or(usize::MAX)
+                .saturating_add(row_index)
+                .saturating_add(1);
+
+            for (col_idx, (cell, _)) in row
+                .iter()
+                .zip(&columns)
+                .enumerate()
+                .filter(|(_, (cell, column))| column.is_none() && !is_blank(cell))
+            {
+                unnamed_columns_with_data.entry(col_idx).or_insert_with(|| {
+                    format!(
+                        "column {} (first value at row {}: {:?})",
+                        column_name(sheet_column(first_col, col_idx)),
+                        row_number,
+                        cell.to_string()
+                    )
+                });
+            }
+
             // Skip empty rows
-            let is_empty_row = row.iter().all(|cell| match cell {
-                Data::Empty => true,
-                Data::String(s) => s.trim().is_empty(),
-                Data::Error(_) => true,
-                _ => false,
-            });
+            let is_empty_row = row
+                .iter()
+                .all(|cell| is_blank(cell) || matches!(cell, Data::Error(_)));
             if is_empty_row {
                 continue;
             }
 
             // Convert row to JSON object with intelligent type coercion
             let mut json_obj = Map::new();
-            for (col_idx, cell) in row.iter().enumerate() {
-                let Some(header) = headers.get(col_idx) else {
+            for (cell, column) in row.iter().zip(&columns) {
+                let Some(header) = column else {
                     continue;
                 };
                 if let Data::Error(e) = cell {
-                    error_cells.push(format!("row {}, column '{}': {}", row_index + 1, header, e));
+                    error_cells.push(format!("row {}, column '{}': {}", row_number, header, e));
                     continue;
                 }
                 let value = self.convert_cell_to_json_with_schema_awareness(cell, header);
                 json_obj.insert(header.clone(), value);
             }
 
-            parsed_rows.push((row_index + 1, json_obj));
+            parsed_rows.push((row_number, json_obj));
+        }
+
+        if !unnamed_columns_with_data.is_empty() {
+            return Err(anyhow::anyhow!(
+                "The sheet \"{}\" has data in {} column(s) without a header. Add a header or clear these cells and try again:\n  {}",
+                self.sheet_name,
+                unnamed_columns_with_data.len(),
+                unnamed_columns_with_data
+                    .into_values()
+                    .collect::<Vec<_>>()
+                    .join("\n  ")
+            ));
         }
 
         if !error_cells.is_empty() {
@@ -1820,12 +1864,51 @@ impl ExcelValidator {
     }
 }
 
+/// A cell with nothing in it but whitespace.
+fn is_blank(cell: &Data) -> bool {
+    match cell {
+        Data::Empty => true,
+        Data::String(s) => s.trim().is_empty(),
+        _ => false,
+    }
+}
+
+/// The 0-based sheet column of the cell `offset` places into a range starting at column `start`.
+fn sheet_column(start: u32, offset: usize) -> u32 {
+    start.saturating_add(u32::try_from(offset).unwrap_or(u32::MAX))
+}
+
+/// The name Excel shows for a 0-based column index ("A", "BI", ...).
+fn column_name(index: u32) -> String {
+    match u16::try_from(index) {
+        Ok(col) if index < EXCEL_MAX_COLUMNS => {
+            rust_xlsxwriter::utility::column_number_to_name(col)
+        }
+        _ => format!("number {}", index.saturating_add(1)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_utils::*; // Import test utilities from src/test_utils.rs
     use calamine::Data;
     use serde_json::{Value, json};
+
+    #[test]
+    fn column_name_is_the_excel_letter_up_to_the_last_column() {
+        let last_column = EXCEL_MAX_COLUMNS - 1;
+        assert_eq!(column_name(0), "A");
+        assert_eq!(column_name(60), "BI");
+        assert_eq!(column_name(last_column), "XFD");
+    }
+
+    #[test]
+    fn column_name_past_the_last_excel_column_is_its_number() {
+        let expected = format!("number {}", EXCEL_MAX_COLUMNS + 1);
+        assert_eq!(column_name(EXCEL_MAX_COLUMNS), expected);
+        assert_eq!(column_name(u32::MAX), "number 4294967295");
+    }
 
     #[test]
     fn test_empty_cell_conversion_for_non_mandatory_number() {
