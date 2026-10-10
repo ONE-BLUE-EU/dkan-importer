@@ -53,6 +53,37 @@ cargo run -- --base-url https://dkan.example.com --excel-file ./data/sample-data
 - **`--password`** (optional) - Password for authentication (will be prompted if not provided)
 - **`--dataset-id`** (required) - UUID of the existing DKAN dataset to add the CSV as a distribution
 - **`--sheet-name`** (optional) - Name of the Excel sheet to process (defaults to "Sheet1")
+- **`--unpivot`** (optional) - Unpivot the sheet: one row per sample cell. Requires `--headers-column`. See [Unpivoting a wide sheet](#unpivoting-a-wide-sheet)
+- **`--headers-column`** (with `--unpivot` only) - The data dictionary field that receives each sample column's header
+- **`--values-column`** (with `--unpivot` only) - The data dictionary field that receives each sample cell's value (defaults to "Concentration")
+
+### Unpivoting a wide sheet
+
+Some sheets have one column per sample, for example "Analytical results": each row is a substance, and each sample column holds its concentration in that sample. `--unpivot` turns every sample cell into its own row:
+
+```bash
+dkan-importer ... --sheet-name "Analytical results" \
+  --unpivot --headers-column "Sample Tag" --values-column "Concentration"
+```
+
+```
+Substance name | ST01_Surface | ST02_Surface
+Okadaic acid   | 0.88         | 0.40
+```
+
+becomes
+
+```
+Substance name | Sample Tag   | Concentration
+Okadaic acid   | ST01_Surface | 0.88
+Okadaic acid   | ST02_Surface | 0.40
+```
+
+- The leading columns whose headers are data dictionary fields are copied to every row. Every column after them is a sample column.
+- `--headers-column` and `--values-column` are only accepted with `--unpivot`, and `--unpivot` needs `--headers-column`. Both must be data dictionary fields that are not columns in the sheet. Otherwise the run stops and lists the fields that can be used.
+- The run also stops, before anything is written or uploaded, if the sheet does not start with data dictionary fields, has no sample columns, or has a data dictionary field among the sample columns.
+- Before validating, it prints what it will do, for example: `Keeping 9 column(s) A-I (Anal. Method Serial No. … Limit of quantification); unpivoting 74 column(s) J-CE (ST01_Surface … ST41_Bottom) into Sample Tag / Concentration: 518 row(s).`
+- Validation errors name the source row. The row data in `errors.log` includes the sample column's header.
 
 ## DKAN Data Dictionary Format
 

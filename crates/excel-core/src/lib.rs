@@ -17,6 +17,8 @@ pub mod writers;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
 
-pub use excel_validator::{ExcelValidator, ExcelValidatorBuilder, FieldSchema, SchemaType};
+pub use excel_validator::{
+    ExcelValidator, ExcelValidatorBuilder, FieldSchema, SchemaType, Unpivot,
+};
 
 pub const ERRORS_LOG_FILE: &str = "errors.log";

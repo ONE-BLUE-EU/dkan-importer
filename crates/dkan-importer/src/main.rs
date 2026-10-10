@@ -11,8 +11,8 @@ use dkan_importer::{
         upload_distribution_csv_file,
     },
 };
-use excel_core::ExcelValidatorBuilder;
 use excel_core::reqwest::blocking::Client;
+use excel_core::{ExcelValidatorBuilder, Unpivot};
 use rpassword::prompt_password;
 
 #[derive(Parser)]
@@ -47,6 +47,57 @@ struct Args {
     /// The UUID of the existing DKAN dataset to add the CSV file as a distribution
     #[arg(long)]
     dataset_id: String,
+
+    /// Unpivot the sheet: turn each sample column into one row per cell.
+    ///
+    /// How the sheet is split: the leading columns whose headers are data
+    /// dictionary fields are copied to every row. Every column after them is a
+    /// sample column. Each sample cell becomes a row: the column's header goes
+    /// to --headers-column and the cell to --values-column. Both must be data
+    /// dictionary fields that are not columns in the sheet.
+    ///
+    /// Example:
+    ///   dkan-importer ... --sheet-name "Analytical results" \
+    ///     --unpivot --headers-column "Sample Tag" --values-column "Concentration"
+    ///
+    ///   Substance name | ST01_Surface | ST02_Surface
+    ///   Okadaic acid   | 0.88         | 0.40
+    ///
+    ///   becomes
+    ///
+    ///   Substance name | Sample Tag   | Concentration
+    ///   Okadaic acid   | ST01_Surface | 0.88
+    ///   Okadaic acid   | ST02_Surface | 0.40
+    #[arg(
+        long,
+        requires = "headers_column",
+        help_heading = "Unpivot",
+        verbatim_doc_comment
+    )]
+    unpivot: bool,
+
+    /// The data dictionary field that receives each sample column's header.
+    /// Only with --unpivot.
+    #[arg(
+        long,
+        value_name = "FIELD",
+        requires = "unpivot",
+        help_heading = "Unpivot",
+        verbatim_doc_comment
+    )]
+    headers_column: Option<String>,
+
+    /// The data dictionary field that receives each sample cell's value.
+    /// Only with --unpivot.
+    #[arg(
+        long,
+        value_name = "FIELD",
+        default_value = "Concentration",
+        requires = "unpivot",
+        help_heading = "Unpivot",
+        verbatim_doc_comment
+    )]
+    values_column: String,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -75,9 +126,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let json_schema = data_dictionary.to_json_schema()?;
     let title_to_name_mapping =
         DataDictionary::create_title_to_name_mapping(&data_dictionary.fields)?;
-    let mut validator =
-        ExcelValidatorBuilder::new(&arguments.excel_file, &arguments.sheet_name, json_schema)
-            .build()?;
+    let mut builder =
+        ExcelValidatorBuilder::new(&arguments.excel_file, &arguments.sheet_name, json_schema);
+    if arguments.unpivot {
+        // clap makes --unpivot require --headers-column
+        let headers_column = arguments
+            .headers_column
+            .ok_or("--unpivot requires --headers-column")?;
+        builder = builder.unpivot(Unpivot {
+            headers_column,
+            values_column: arguments.values_column,
+        });
+    }
+    let mut validator = builder.build()?;
+    if let Some(summary) = validator.unpivot_summary() {
+        println!("✅ {summary}");
+    }
     if let Err(e) = validator.validate_excel() {
         // The error says whether the details are in the error log or in the message itself
         eprintln!("❌ {e}");

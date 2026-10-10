@@ -25,8 +25,13 @@ const EXCEL_MAX_COLUMNS: u32 = 16_384;
 /// Type alias for a parsed Excel row with row number and field data
 pub type ParsedExcelRow = (usize, Map<String, Value>);
 
-/// Type alias for the result of processing Excel rows - (headers, parsed_rows)
-pub type ExcelProcessingResult = (Vec<String>, Vec<ParsedExcelRow>);
+/// A sheet read into rows ready for validation
+struct ProcessedSheet {
+    headers: Vec<String>,
+    rows: Vec<ParsedExcelRow>,
+    /// What the unpivot did, when the sheet was unpivoted
+    unpivot_summary: Option<String>,
+}
 
 #[derive(Error, Debug, Clone)]
 pub enum ValidationError {
@@ -129,12 +134,34 @@ pub struct ExcelValidator {
     pub validation_reports: Vec<ValidationReport>,
     headers: Vec<String>,
     rows: Vec<ParsedExcelRow>,
+    unpivot_summary: Option<String>,
 }
 
 pub struct ExcelValidatorBuilder {
     excel_path: String,
     sheet_name: String,
     schema: Value,
+    unpivot: Option<Unpivot>,
+}
+
+/// Unpivot a wide sheet: each cell of a sample column becomes its own row.
+///
+/// The sheet's leading columns whose headers are schema fields are kept and copied to every row;
+/// every column after them is a sample column. Both fields must be schema fields that are not
+/// sheet columns.
+pub struct Unpivot {
+    /// The field that receives the sample column's header
+    pub headers_column: String,
+    /// The field that receives the sample column's cell value
+    pub values_column: String,
+}
+
+/// The sample columns of an unpivoted sheet and the fields they go to
+struct SampleColumns {
+    /// (column index, header) of each sample column
+    columns: Vec<(usize, String)>,
+    headers_column: String,
+    values_column: String,
 }
 
 impl ExcelValidatorBuilder {
@@ -149,7 +176,14 @@ impl ExcelValidatorBuilder {
             excel_path: excel_path.to_string(),
             sheet_name: sheet_name.to_string(),
             schema,
+            unpivot: None,
         }
+    }
+
+    /// Unpivot the sheet while reading it; see [`Unpivot`].
+    pub fn unpivot(mut self, unpivot: Unpivot) -> Self {
+        self.unpivot = Some(unpivot);
+        self
     }
 
     /// Build the ExcelValidator, processing Excel rows during construction
@@ -174,10 +208,11 @@ impl ExcelValidatorBuilder {
             validation_reports: Vec::new(),
             headers: Vec::new(),
             rows: Vec::new(),
+            unpivot_summary: None,
         };
 
         // Process Excel rows once during build
-        let (headers, rows) = temp_validator.process_excel_rows()?;
+        let sheet = temp_validator.process_excel_rows(self.unpivot.as_ref())?;
 
         Ok(ExcelValidator {
             excel_path: self.excel_path,
@@ -185,8 +220,9 @@ impl ExcelValidatorBuilder {
             validator,
             field_schemas,
             validation_reports: Vec::new(),
-            headers,
-            rows,
+            headers: sheet.headers,
+            rows: sheet.rows,
+            unpivot_summary: sheet.unpivot_summary,
         })
     }
 }
@@ -213,7 +249,14 @@ impl ExcelValidator {
             validation_reports: Vec::new(),
             headers: Vec::new(),
             rows: Vec::new(),
+            unpivot_summary: None,
         })
+    }
+
+    /// What the unpivot did (columns kept and unpivoted, rows produced), when the sheet was
+    /// unpivoted
+    pub fn unpivot_summary(&self) -> Option<&str> {
+        self.unpivot_summary.as_deref()
     }
 
     /// Get the headers from the Excel file
@@ -552,7 +595,7 @@ impl ExcelValidator {
 
     /// Helper method to process Excel files and return parsed row data
     /// Returns headers and a vector of (row_number, parsed_json_object) tuples
-    fn process_excel_rows(&self) -> Result<ExcelProcessingResult> {
+    fn process_excel_rows(&self, unpivot: Option<&Unpivot>) -> Result<ProcessedSheet> {
         let mut workbook: Xlsx<_> = open_workbook(&self.excel_path).with_context(|| {
             format!(
                 "The Excel file does not exist in the provided path: \"{}\"",
@@ -577,6 +620,9 @@ impl ExcelValidator {
         // One entry per column; `None` for a column without a header
         let mut columns: Vec<Option<String>> = Vec::new();
         let mut headers: Vec<String> = Vec::new();
+        // Indices of the columns copied to every row: all named columns, unless unpivoting
+        let mut kept: Vec<usize> = Vec::new();
+        let mut samples: Option<SampleColumns> = None;
         let mut parsed_rows: Vec<ParsedExcelRow> = Vec::new();
         // Excel error values (#N/A, #DIV/0!, ...) are broken cells, not data: collect them all
         let mut error_cells: Vec<String> = Vec::new();
@@ -598,6 +644,28 @@ impl ExcelValidator {
 
                 // Check for duplicate headers
                 Self::check_header_duplicates(&headers)?;
+
+                match unpivot {
+                    None => {
+                        kept = (0..columns.len())
+                            .filter(|&i| columns.get(i).is_some_and(Option::is_some))
+                            .collect();
+                    }
+                    Some(unpivot) => {
+                        let (unpivot_kept, unpivot_samples) =
+                            self.unpivot_layout(&columns, unpivot, first_col)?;
+                        headers = unpivot_kept
+                            .iter()
+                            .filter_map(|&i| columns.get(i).cloned().flatten())
+                            .chain([
+                                unpivot_samples.headers_column.clone(),
+                                unpivot_samples.values_column.clone(),
+                            ])
+                            .collect();
+                        kept = unpivot_kept;
+                        samples = Some(unpivot_samples);
+                    }
+                }
 
                 continue;
             }
@@ -634,8 +702,9 @@ impl ExcelValidator {
 
             // Convert row to JSON object with intelligent type coercion
             let mut json_obj = Map::new();
-            for (cell, column) in row.iter().zip(&columns) {
-                let Some(header) = column else {
+            for &col_idx in &kept {
+                let (Some(cell), Some(Some(header))) = (row.get(col_idx), columns.get(col_idx))
+                else {
                     continue;
                 };
                 if let Data::Error(e) = cell {
@@ -646,7 +715,29 @@ impl ExcelValidator {
                 json_obj.insert(header.clone(), value);
             }
 
-            parsed_rows.push((row_number, json_obj));
+            let Some(samples) = &samples else {
+                parsed_rows.push((row_number, json_obj));
+                continue;
+            };
+            for (col_idx, header) in &samples.columns {
+                let Some(cell) = row.get(*col_idx) else {
+                    continue;
+                };
+                if let Data::Error(e) = cell {
+                    error_cells.push(format!("row {}, column '{}': {}", row_number, header, e));
+                    continue;
+                }
+                let mut sample_obj = json_obj.clone();
+                sample_obj.insert(
+                    samples.headers_column.clone(),
+                    Value::String(header.clone()),
+                );
+                sample_obj.insert(
+                    samples.values_column.clone(),
+                    self.convert_cell_to_json_with_schema_awareness(cell, &samples.values_column),
+                );
+                parsed_rows.push((row_number, sample_obj));
+            }
         }
 
         if !unnamed_columns_with_data.is_empty() {
@@ -670,7 +761,141 @@ impl ExcelValidator {
             ));
         }
 
-        Ok((headers, parsed_rows))
+        let unpivot_summary = samples.map(|samples| {
+            let kept_columns: Vec<(usize, &str)> = kept
+                .iter()
+                .filter_map(|&i| columns.get(i)?.as_deref().map(|name| (i, name)))
+                .collect();
+            let sample_columns: Vec<(usize, &str)> = samples
+                .columns
+                .iter()
+                .map(|(i, name)| (*i, name.as_str()))
+                .collect();
+            format!(
+                "Keeping {} column(s) {}; unpivoting {} column(s) {} into {} / {}: {} row(s).",
+                kept_columns.len(),
+                column_span(&kept_columns, first_col),
+                sample_columns.len(),
+                column_span(&sample_columns, first_col),
+                samples.headers_column,
+                samples.values_column,
+                parsed_rows.len()
+            )
+        });
+
+        Ok(ProcessedSheet {
+            headers,
+            rows: parsed_rows,
+            unpivot_summary,
+        })
+    }
+
+    /// Split the sheet's columns for `unpivot`: the indices of the leading columns that are schema
+    /// fields (kept), and the sample columns after them. Refuses targets that are not usable
+    /// fields, and sheets that do not have a kept part followed by a sample part.
+    fn unpivot_layout(
+        &self,
+        columns: &[Option<String>],
+        unpivot: &Unpivot,
+        first_col: u32,
+    ) -> Result<(Vec<usize>, SampleColumns)> {
+        let headers_column = normalize_string(&unpivot.headers_column);
+        let values_column = normalize_string(&unpivot.values_column);
+        let named: Vec<(usize, &str)> = columns
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| c.as_deref().map(|name| (i, name)))
+            .collect();
+        let describe = |(i, name): (usize, &str)| {
+            format!(
+                "column {} \"{}\"",
+                column_name(sheet_column(first_col, i)),
+                name
+            )
+        };
+
+        if headers_column == values_column {
+            return Err(anyhow::anyhow!(
+                "The headers column and the values column must be different fields; both are \"{}\".",
+                headers_column
+            ));
+        }
+
+        let mut candidates: Vec<&str> = self
+            .field_schemas
+            .keys()
+            .map(String::as_str)
+            .filter(|field| !named.iter().any(|(_, name)| name == field))
+            .collect();
+        candidates.sort_unstable();
+        for (role, field) in [
+            ("headers column", &headers_column),
+            ("values column", &values_column),
+        ] {
+            if !candidates.contains(&field.as_str()) {
+                return Err(anyhow::anyhow!(
+                    "The {} \"{}\" must be a data dictionary field that is not a column in the sheet \"{}\". Candidates: {}",
+                    role,
+                    field,
+                    self.sheet_name,
+                    candidates.join(", ")
+                ));
+            }
+        }
+
+        let kept_count = named
+            .iter()
+            .take_while(|(_, name)| self.field_schemas.contains_key(*name))
+            .count();
+        let (kept, sample_part) = named.split_at(kept_count.min(named.len()));
+
+        let Some(&first_sample) = sample_part.first() else {
+            return Err(anyhow::anyhow!(
+                "Cannot unpivot the sheet \"{}\": it has no sample columns after the data dictionary fields{}.",
+                self.sheet_name,
+                kept.last()
+                    .map(|&last| format!(" (the last is {})", describe(last)))
+                    .unwrap_or_default()
+            ));
+        };
+        if kept.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Cannot unpivot the sheet \"{}\": it starts with {}, which is not a data dictionary field. The sheet must start with the columns to keep (data dictionary fields), followed by the sample columns.",
+                self.sheet_name,
+                describe(first_sample)
+            ));
+        }
+
+        let misplaced: Vec<String> = sample_part
+            .iter()
+            .filter(|(_, name)| self.field_schemas.contains_key(*name))
+            .map(|&column| {
+                format!(
+                    "{} is a data dictionary field after the first sample {}",
+                    describe(column),
+                    describe(first_sample)
+                )
+            })
+            .collect();
+        if !misplaced.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Cannot unpivot the sheet \"{}\": move these columns before the sample columns:\n  {}",
+                self.sheet_name,
+                misplaced.join("\n  ")
+            ));
+        }
+
+        Ok((
+            kept.iter().map(|(i, _)| *i).collect(),
+            SampleColumns {
+                columns: sample_part
+                    .iter()
+                    .map(|(i, name)| (*i, name.to_string()))
+                    .collect(),
+                headers_column,
+                values_column,
+            },
+        ))
     }
 
     /// Format validation reports into a structured string for logging
@@ -1870,6 +2095,22 @@ fn is_blank(cell: &Data) -> bool {
         Data::Empty => true,
         Data::String(s) => s.trim().is_empty(),
         _ => false,
+    }
+}
+
+/// "A-I (first … last)" for a run of (column index, header) columns; "A (header)" for one.
+fn column_span(columns: &[(usize, &str)], first_col: u32) -> String {
+    let letter = |i: usize| column_name(sheet_column(first_col, i));
+    match (columns.first(), columns.last()) {
+        (Some(first), Some(last)) if first.0 != last.0 => format!(
+            "{}-{} ({} … {})",
+            letter(first.0),
+            letter(last.0),
+            first.1,
+            last.1
+        ),
+        (Some(only), _) => format!("{} ({})", letter(only.0), only.1),
+        _ => String::from("(none)"),
     }
 }
 

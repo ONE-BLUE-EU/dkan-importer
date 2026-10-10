@@ -36,6 +36,8 @@ cargo run -r -p unpivoter -- \
   --separator-column 11
 ```
 
+`dkan-importer --unpivot` now unpivots while importing, taking the column names from the data dictionary (see [crates/dkan-importer/README.md](crates/dkan-importer/README.md#unpivoting-a-wide-sheet)). `upr` will be retired once that has been used for a real import.
+
 The output is written to `<file>_<sheet>.xlsx` in the current directory, in a sheet named `Analytical results`. Add `--debug` to print the detected cell types and boolean columns. Run `cargo run -p unpivoter -- --help` to see all options.
 
 ## Shared library: `excel-core`
