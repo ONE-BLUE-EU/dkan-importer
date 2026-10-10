@@ -6,7 +6,7 @@ Findings from reviewing the code against [ENGINEERING_STANDARDS.md](ENGINEERING_
 ## Open
 
 - [ ] **Coordinate detection matches substrings of unrelated field names** (§3).
-  `importer-lib/src/excel_validator.rs` treats any field whose name contains `lat`, `lon` or `lng`
+  `crates/excel-core/src/excel_validator.rs` treats any field whose name contains `lat`, `lon` or `lng`
   as a coordinate, so "Plate count", "Isolate", "Colony" or "Salinity class" are sent through the
   coordinate parser. Example: a string field "Isolate code" with the value `12` is parsed as
   latitude 12.0 and then fails validation as a number in a string column. Match whole words, or
@@ -16,7 +16,7 @@ Findings from reviewing the code against [ENGINEERING_STANDARDS.md](ENGINEERING_
 
 - [x] **Empty numeric cells are uploaded as zero.** Kept on purpose, because DKAN infers column types
   from the CSV. Now documented on `NUMERIC_PLACEHOLDER` / `INTEGER_PLACEHOLDER` and in
-  `dkan-importer/README.md`, and pinned by `tests/excel_file_pipeline_test.rs`.
+  `crates/dkan-importer/README.md`, and pinned by `tests/excel_file_pipeline_test.rs`.
 - [x] **Excel error cells (`#N/A`, ...) were uploaded as zero.** They now stop the import with a list of
   the affected cells.
 - [x] **Ambiguous dates.** Numeric dates are read day-first only. Month-first dates, and any other

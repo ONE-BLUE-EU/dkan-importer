@@ -7,13 +7,13 @@ Rules all work in this workspace must follow. Condensed from `~/projects/enginee
 Simplest solution that fully solves the problem wins over every other rule. Solve the problem in front of you, check what already exists, fix causes not symptoms, prefer deleting. Growing complexity means re-read the requirement.
 
 ## 2. Functional Core, Imperative Shell
-Logic is pure functions (no I/O, clock, or ambient config) in `importer-lib` and `pivoter/src/lib.rs`. Each binary's `main` is a thin shell: parse input, call the core, perform side effects.
+Logic is pure functions (no I/O, clock, or ambient config) in `excel-core` and `unpivoter/src/lib.rs`. Each binary's `main` is a thin shell: parse input, call the core, perform side effects.
 
 ## 3. Parse, Don't Validate
 At every boundary (CLI args, Excel cells, DKAN responses) convert input into types that can only hold valid values. Don't check and then pass the raw `String` on.
 
 ## 4. One Source of Truth
-Shared code lives in `importer-lib`; dependency versions in the root `Cargo.toml`. Tests import production constants and helpers — no parallel copies.
+Shared code lives in `excel-core`; dependency versions in the root `Cargo.toml`. Tests import production constants and helpers — no parallel copies.
 
 ## 5. Explicit Errors
 Startup failures (DKAN unreachable, bad login, bad data dictionary, missing sheet) stop the run with a named error and non-zero exit before anything is written or uploaded. Never default to empty or zero.

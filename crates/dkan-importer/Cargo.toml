@@ -1,0 +1,12 @@
+[package]
+name = "dkan-importer"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+clap.workspace = true
+rpassword.workspace = true
+
+# Common lib
+excel-core.workspace = true

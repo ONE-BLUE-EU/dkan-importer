@@ -1,13 +1,14 @@
 [workspace]
 resolver = "3"
-members = ["importer-lib", "dkan-importer", "pivoter"]
+members = ["crates/*"]
 
 [workspace.package]
 version = "0.1.0"
+edition = "2024"
 
 [workspace.dependencies]
 # Internal crates
-importer-lib = { path = "importer-lib" }
+excel-core = { path = "crates/excel-core" }
 
 # Excel reader / writer
 calamine = "0.36"
