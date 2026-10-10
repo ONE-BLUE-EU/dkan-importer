@@ -7,7 +7,7 @@ use clap::Parser;
 use dkan_importer::{
     model::DataDictionary,
     utils::{
-        dataset_add_distribution, delete_remote_file, generate_unique_filename,
+        check_upload_login, dataset_add_distribution, delete_remote_file, generate_unique_filename,
         upload_distribution_csv_file,
     },
 };
@@ -67,6 +67,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|e| format!("Failed to read the password: {e}"))?,
     };
     let client = Client::new();
+    // A bad login must stop the run before anything is written
+    check_upload_login(&arguments.base_url, &arguments.username, &password, &client)?;
+    println!("✅ Login accepted for user \"{}\"", arguments.username);
     let data_dictionary =
         DataDictionary::new(&arguments.base_url, &arguments.data_dictionary_id, &client)?;
     let json_schema = data_dictionary.to_json_schema()?;

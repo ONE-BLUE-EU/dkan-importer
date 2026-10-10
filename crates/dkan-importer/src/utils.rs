@@ -1,14 +1,77 @@
 use excel_core::anyhow;
+use excel_core::reqwest::StatusCode;
 use excel_core::reqwest::blocking::Client;
 use excel_core::reqwest::blocking::multipart::{Form, Part};
 use excel_core::serde_json;
 use excel_core::utils::{get_local_datetime_with_format, normalize_string};
+use serde::Deserialize;
+
+/// The importer module's answer to an authorised upload request that carries no file.
+const NO_FILE_UPLOADED: &str = "No file uploaded.";
+
+/// The body of an error response from the importer module.
+#[derive(Deserialize)]
+struct ImporterError {
+    error: String,
+    details: Option<String>,
+}
 
 pub fn generate_unique_filename(dataset_id: &str, excel_sheet_name: &str) -> String {
     let timestamp = get_local_datetime_with_format("%Y-%m-%d_%H-%M-%S");
     let excel_sheet_name = normalize_string(excel_sheet_name).replace(" ", "_");
     let filename = format!("{excel_sheet_name}_{timestamp}_{dataset_id}.csv");
     return filename.to_lowercase();
+}
+
+/// Check that DKAN accepts the login for uploads, without uploading anything: the importer answers
+/// an upload request without a file with "No file uploaded." only once the login and the
+/// "upload csv files" permission have been accepted.
+pub fn check_upload_login(
+    url: &str,
+    username: &str,
+    password: &str,
+    client: &Client,
+) -> Result<(), anyhow::Error> {
+    let upload_url = format!("{url}/api/importer/upload");
+    let response = client
+        .post(&upload_url)
+        .basic_auth(username, Some(password))
+        .send()?;
+    let status = response.status();
+    let body = response.text()?;
+
+    match status {
+        // Drupal does not say which: a wrong password and a missing permission look the same
+        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(anyhow::anyhow!(
+            "DKAN at {url} rejected the login for user \"{username}\" (HTTP {status}). Check the username and password, that the account is active and not locked out, and that it has the \"upload csv files\" permission."
+        )),
+        StatusCode::BAD_REQUEST
+            if serde_json::from_str::<ImporterError>(&body)
+                .is_ok_and(|e| e.error == NO_FILE_UPLOADED) =>
+        {
+            Ok(())
+        }
+        _ => Err(anyhow::anyhow!(
+            "Unexpected response checking the login at {upload_url}: {}",
+            describe_failure(status, &body)
+        )),
+    }
+}
+
+/// `HTTP <status>`, followed by the importer's error and details when the body has them. Any other
+/// body, such as a Drupal HTML page, is left out.
+fn describe_failure(status: StatusCode, body: &str) -> String {
+    match serde_json::from_str::<ImporterError>(body) {
+        Ok(ImporterError {
+            error,
+            details: Some(details),
+        }) => format!("HTTP {status}: {error} ({details})"),
+        Ok(ImporterError {
+            error,
+            details: None,
+        }) => format!("HTTP {status}: {error}"),
+        Err(_) => format!("HTTP {status}"),
+    }
 }
 
 // Function to upload CSV to custom importer endpoint
@@ -56,10 +119,10 @@ pub fn upload_distribution_csv_file(
             .to_string();
         Ok(file_url)
     } else {
-        let error_text = response.text()?;
+        let body = response.text()?;
         Err(anyhow::anyhow!(
             "Custom importer upload failed: {}",
-            error_text
+            describe_failure(status, &body)
         ))
     }
 }
