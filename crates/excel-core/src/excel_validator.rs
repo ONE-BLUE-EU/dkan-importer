@@ -31,6 +31,8 @@ struct ProcessedSheet {
     rows: Vec<ParsedExcelRow>,
     /// What the unpivot did, when the sheet was unpivoted
     unpivot_summary: Option<String>,
+    /// What moving the extra columns did, when they were moved
+    extra_columns_summary: Option<String>,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -135,6 +137,7 @@ pub struct ExcelValidator {
     headers: Vec<String>,
     rows: Vec<ParsedExcelRow>,
     unpivot_summary: Option<String>,
+    extra_columns_summary: Option<String>,
 }
 
 pub struct ExcelValidatorBuilder {
@@ -142,6 +145,7 @@ pub struct ExcelValidatorBuilder {
     sheet_name: String,
     schema: Value,
     unpivot: Option<Unpivot>,
+    extra_columns_to: Option<String>,
 }
 
 /// Unpivot a wide sheet: each cell of a sample column becomes its own row.
@@ -164,6 +168,13 @@ struct SampleColumns {
     values_column: String,
 }
 
+/// The sheet's columns that are not data dictionary fields, and the field they are moved into
+struct ExtraColumns {
+    /// (column index, header) of each extra column
+    columns: Vec<(usize, String)>,
+    target: String,
+}
+
 impl ExcelValidatorBuilder {
     /// Create a new ExcelValidatorBuilder
     ///
@@ -177,6 +188,7 @@ impl ExcelValidatorBuilder {
             sheet_name: sheet_name.to_string(),
             schema,
             unpivot: None,
+            extra_columns_to: None,
         }
     }
 
@@ -186,11 +198,29 @@ impl ExcelValidatorBuilder {
         self
     }
 
+    /// Move the sheet's columns that are not data dictionary fields into `field`, a dictionary
+    /// field that takes text, instead of refusing them.
+    ///
+    /// For each row with data in those columns, `field` gets a JSON object of their non-blank
+    /// cells, keyed by header in sheet order. Text already in `field` is kept in the object under
+    /// its own header, first. Rows without such data keep `field` as it is.
+    pub fn extra_columns_to(mut self, field: &str) -> Self {
+        self.extra_columns_to = Some(field.to_string());
+        self
+    }
+
     /// Build the ExcelValidator, processing Excel rows during construction
     ///
     /// This method reads the Excel file once and caches the headers and rows,
     /// making subsequent validation and export operations more efficient.
     pub fn build(self) -> Result<ExcelValidator> {
+        // An unpivoted sheet has no extra columns: every column after the fields is a sample
+        if self.unpivot.is_some() && self.extra_columns_to.is_some() {
+            return Err(anyhow::anyhow!(
+                "Unpivot the sheet or move its extra columns, not both."
+            ));
+        }
+
         // Create validator from schema
         let validator = jsonschema::validator_for(&self.schema)
             .map_err(|e| anyhow::anyhow!("Invalid JSON schema: {}", e))?;
@@ -209,10 +239,12 @@ impl ExcelValidatorBuilder {
             headers: Vec::new(),
             rows: Vec::new(),
             unpivot_summary: None,
+            extra_columns_summary: None,
         };
 
         // Process Excel rows once during build
-        let sheet = temp_validator.process_excel_rows(self.unpivot.as_ref())?;
+        let sheet = temp_validator
+            .process_excel_rows(self.unpivot.as_ref(), self.extra_columns_to.as_deref())?;
 
         Ok(ExcelValidator {
             excel_path: self.excel_path,
@@ -223,6 +255,7 @@ impl ExcelValidatorBuilder {
             headers: sheet.headers,
             rows: sheet.rows,
             unpivot_summary: sheet.unpivot_summary,
+            extra_columns_summary: sheet.extra_columns_summary,
         })
     }
 }
@@ -250,6 +283,7 @@ impl ExcelValidator {
             headers: Vec::new(),
             rows: Vec::new(),
             unpivot_summary: None,
+            extra_columns_summary: None,
         })
     }
 
@@ -257,6 +291,12 @@ impl ExcelValidator {
     /// unpivoted
     pub fn unpivot_summary(&self) -> Option<&str> {
         self.unpivot_summary.as_deref()
+    }
+
+    /// What moving the extra columns did (columns moved, rows with extra data), when they were
+    /// moved; see [`ExcelValidatorBuilder::extra_columns_to`]
+    pub fn extra_columns_summary(&self) -> Option<&str> {
+        self.extra_columns_summary.as_deref()
     }
 
     /// Get the headers from the Excel file
@@ -595,7 +635,11 @@ impl ExcelValidator {
 
     /// Helper method to process Excel files and return parsed row data
     /// Returns headers and a vector of (row_number, parsed_json_object) tuples
-    fn process_excel_rows(&self, unpivot: Option<&Unpivot>) -> Result<ProcessedSheet> {
+    fn process_excel_rows(
+        &self,
+        unpivot: Option<&Unpivot>,
+        extra_columns_to: Option<&str>,
+    ) -> Result<ProcessedSheet> {
         let mut workbook: Xlsx<_> = open_workbook(&self.excel_path).with_context(|| {
             format!(
                 "The Excel file does not exist in the provided path: \"{}\"",
@@ -623,6 +667,8 @@ impl ExcelValidator {
         // Indices of the columns copied to every row: all named columns, unless unpivoting
         let mut kept: Vec<usize> = Vec::new();
         let mut samples: Option<SampleColumns> = None;
+        let mut extras: Option<ExtraColumns> = None;
+        let mut rows_with_extra_data: usize = 0;
         let mut parsed_rows: Vec<ParsedExcelRow> = Vec::new();
         // Excel error values (#N/A, #DIV/0!, ...) are broken cells, not data: collect them all
         let mut error_cells: Vec<String> = Vec::new();
@@ -650,6 +696,18 @@ impl ExcelValidator {
                         kept = (0..columns.len())
                             .filter(|&i| columns.get(i).is_some_and(Option::is_some))
                             .collect();
+                        if let Some(field) = extra_columns_to {
+                            let extra = self.extra_columns_layout(&columns, field)?;
+                            kept.retain(|i| !extra.columns.iter().any(|(c, _)| c == i));
+                            headers = kept
+                                .iter()
+                                .filter_map(|&i| columns.get(i).cloned().flatten())
+                                .collect();
+                            if !headers.contains(&extra.target) {
+                                headers.push(extra.target.clone());
+                            }
+                            extras = Some(extra);
+                        }
                     }
                     Some(unpivot) => {
                         let (unpivot_kept, unpivot_samples) =
@@ -713,6 +771,35 @@ impl ExcelValidator {
                 }
                 let value = self.convert_cell_to_json_with_schema_awareness(cell, header);
                 json_obj.insert(header.clone(), value);
+            }
+
+            if let Some(extras) = &extras {
+                let mut moved = Map::new();
+                for (col_idx, header) in &extras.columns {
+                    let Some(cell) = row.get(*col_idx).filter(|cell| !is_blank(cell)) else {
+                        continue;
+                    };
+                    if let Data::Error(e) = cell {
+                        error_cells.push(format!("row {}, column '{}': {}", row_number, header, e));
+                        continue;
+                    }
+                    moved.insert(header.clone(), self.extra_cell_to_json(cell, header));
+                }
+                if !moved.is_empty() {
+                    rows_with_extra_data = rows_with_extra_data.saturating_add(1);
+                    let mut object = Map::new();
+                    if let Some(existing) = json_obj
+                        .get(&extras.target)
+                        .filter(|v| !v.is_null() && v.as_str() != Some(""))
+                    {
+                        object.insert(extras.target.clone(), existing.clone());
+                    }
+                    object.extend(moved);
+                    json_obj.insert(
+                        extras.target.clone(),
+                        Value::String(Value::Object(object).to_string()),
+                    );
+                }
             }
 
             let Some(samples) = &samples else {
@@ -783,11 +870,89 @@ impl ExcelValidator {
             )
         });
 
+        let extra_columns_summary = extras.map(|extras| {
+            if extras.columns.is_empty() {
+                return format!("No extra columns to move into {}.", extras.target);
+            }
+            format!(
+                "Moving {} extra column(s) into {}: {}; {} row(s) have extra data.",
+                extras.columns.len(),
+                extras.target,
+                extras
+                    .columns
+                    .iter()
+                    .map(|(i, name)| format!(
+                        "column {} \"{}\"",
+                        column_name(sheet_column(first_col, *i)),
+                        name
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                rows_with_extra_data
+            )
+        });
+
         Ok(ProcessedSheet {
             headers,
             rows: parsed_rows,
             unpivot_summary,
+            extra_columns_summary,
         })
+    }
+
+    /// The sheet's named columns that are not data dictionary fields, to be moved into
+    /// `field`. Refuses a `field` that is not a dictionary field taking text.
+    fn extra_columns_layout(
+        &self,
+        columns: &[Option<String>],
+        field: &str,
+    ) -> Result<ExtraColumns> {
+        let target = normalize_string(field);
+        let mut candidates: Vec<&str> = self
+            .field_schemas
+            .iter()
+            .filter(|(_, schema)| self.schema_expects_string(&schema.field_type))
+            .map(|(name, _)| name.as_str())
+            .collect();
+        candidates.sort_unstable();
+        if !candidates.contains(&target.as_str()) {
+            return Err(anyhow::anyhow!(
+                "The extra columns must go to a data dictionary field that takes text; \"{}\" is not one. Candidates: {}",
+                target,
+                candidates.join(", ")
+            ));
+        }
+
+        Ok(ExtraColumns {
+            columns: columns
+                .iter()
+                .enumerate()
+                .filter_map(|(i, c)| c.as_ref().map(|name| (i, name)))
+                .filter(|(_, name)| !self.field_schemas.contains_key(*name))
+                .map(|(i, name)| (i, name.clone()))
+                .collect(),
+            target,
+        })
+    }
+
+    /// An extra column's cell as it goes into the JSON object: numbers stay numbers (whole ones
+    /// without a fraction), text stays text, dates become ISO text. Blank and error cells are
+    /// handled by the caller.
+    fn extra_cell_to_json(&self, cell: &Data, header: &str) -> Value {
+        match cell {
+            Data::Float(f) if f.fract() == 0.0 && f.abs() < 9_007_199_254_740_992.0 => {
+                // Below 2^53 every whole float is an exact i64
+                json!(*f as i64)
+            }
+            Data::Float(f) => json!(f),
+            Data::Int(i) => json!(i),
+            Data::Bool(b) => Value::Bool(*b),
+            Data::DateTime(dt) => self.convert_datetime_with_schema_intelligence(dt, header),
+            Data::String(s) | Data::DateTimeIso(s) | Data::DurationIso(s) => {
+                Value::String(s.clone())
+            }
+            Data::Empty | Data::Error(_) => Value::Null,
+        }
     }
 
     /// Split the sheet's columns for `unpivot`: the indices of the leading columns that are schema

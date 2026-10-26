@@ -15,7 +15,8 @@ calamine = "0.36"
 rust_xlsxwriter = "0.99"
 
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+# preserve_order: JSON built from a row keeps the sheet's column order
+serde_json = { version = "1.0", features = ["preserve_order"] }
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1.0"
 thiserror = "2.0"

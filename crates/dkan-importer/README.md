@@ -56,6 +56,7 @@ cargo run -- --base-url https://dkan.example.com --excel-file ./data/sample-data
 - **`--unpivot`** (optional) - Unpivot the sheet: one row per sample cell. Requires `--headers-column`. See [Unpivoting a wide sheet](#unpivoting-a-wide-sheet)
 - **`--headers-column`** (with `--unpivot` only) - The data dictionary field that receives each sample column's header
 - **`--values-column`** (with `--unpivot` only) - The data dictionary field that receives each sample cell's value (defaults to "Concentration")
+- **`--extra-columns-to [FIELD]`** (optional, not with `--unpivot`) - Move the columns that are not data dictionary fields into FIELD as JSON instead of refusing them (FIELD defaults to "Remark 1"). See [Keeping extra columns](#keeping-extra-columns)
 
 ### Unpivoting a wide sheet
 
@@ -84,6 +85,36 @@ Okadaic acid   | ST02_Surface | 0.40
 - The run also stops, before anything is written or uploaded, if the sheet does not start with data dictionary fields, has no sample columns, or has a data dictionary field among the sample columns.
 - Before validating, it prints what it will do, for example: `Keeping 9 column(s) A-I (Anal. Method Serial No. … Limit of quantification); unpivoting 74 column(s) J-CE (ST01_Surface … ST41_Bottom) into Sample Tag / Concentration: 518 row(s).`
 - Validation errors name the source row. The row data in `errors.log` includes the sample column's header.
+
+### Keeping extra columns
+
+By default a sheet column that is not a data dictionary field stops the run ("Excel has the following extra columns not found in the provided JSON Schema"). `--extra-columns-to` keeps that data instead, as JSON in one text field:
+
+```bash
+dkan-importer ... --sheet-name "Sample" --extra-columns-to "Remark 3"
+```
+
+```
+Sample Tag | Remark 3    | Slice num | DNA (Yes/No)
+ST01-a     |             | 1         | yes
+ST01-b     | Super dirty | 2         |
+```
+
+becomes
+
+```
+Sample Tag | Remark 3
+ST01-a     | {"Slice num":1,"DNA (Yes/No)":"yes"}
+ST01-b     | {"Remark 3":"Super dirty","Slice num":2}
+```
+
+- Given without a field, `--extra-columns-to` uses "Remark 1".
+- The field must be a data dictionary field that takes text; otherwise the run stops and lists the fields that can be used. If it is not a sheet column, it is added to the export.
+- Keys are the column headers, in sheet order. Numbers stay numbers, text stays text, and blank cells are left out.
+- Text already in the field is kept in the object under the field's own header, first. Rows without extra data keep the field as it is; they never get `{}`.
+- The JSON is validated like any other value, so a field with a maximum length refuses rows whose JSON is longer.
+- Data in a column without a header is still refused.
+- Before validating, it prints what it will do, for example: `Moving 2 extra column(s) into Remark 3: column C "Slice num", column D "DNA (Yes/No)"; 2 row(s) have extra data.`
 
 ## DKAN Data Dictionary Format
 

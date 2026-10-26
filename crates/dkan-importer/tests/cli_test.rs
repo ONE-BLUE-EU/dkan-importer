@@ -108,3 +108,44 @@ fn help_groups_the_unpivot_flags_with_their_default_and_an_example() {
         "{help}"
     );
 }
+
+#[test]
+fn extra_columns_to_with_unpivot_is_refused() {
+    let output = run(&[
+        "--extra-columns-to",
+        "Remark 3",
+        "--unpivot",
+        "--headers-column",
+        "Sample Tag",
+    ]);
+
+    assert_usage_error(&output, "--unpivot");
+}
+
+/// The field is optional: `--extra-columns-to` alone gets past the arguments and stops at the
+/// first network step, the login check.
+#[test]
+fn extra_columns_to_without_a_field_is_accepted() {
+    let output = run(&["--extra-columns-to"]);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let expected_exit_code = Some(1);
+    assert_eq!(output.status.code(), expected_exit_code, "{stderr}");
+    assert!(stderr.contains("/api/importer/upload"), "{stderr}");
+}
+
+#[test]
+fn help_shows_extra_columns_to_with_its_default_field() {
+    let output = Command::new(env!("CARGO_BIN_EXE_dkan-importer"))
+        .arg("--help")
+        .output()
+        .unwrap();
+
+    let help = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{help}");
+    assert!(help.contains("--extra-columns-to [<FIELD>]"), "{help}");
+    assert!(
+        help.contains("[default when given alone: Remark 1]"),
+        "{help}"
+    );
+}

@@ -98,6 +98,37 @@ struct Args {
         verbatim_doc_comment
     )]
     values_column: String,
+
+    /// Move the sheet's columns that are not data dictionary fields into FIELD
+    /// as JSON, instead of refusing them. [default when given alone: Remark 1]
+    ///
+    /// FIELD must be a data dictionary field that takes text. For each row with
+    /// data in those columns, FIELD gets a JSON object of their non-blank cells,
+    /// keyed by header in sheet order. Text already in FIELD is kept in the
+    /// object under FIELD's own header, first. Rows without such data keep FIELD
+    /// as it is. Not with --unpivot.
+    ///
+    /// Example:
+    ///   dkan-importer ... --sheet-name "Sample" --extra-columns-to "Remark 3"
+    ///
+    ///   Sample Tag | Remark 3    | Slice num | DNA (Yes/No)
+    ///   ST01-a     |             | 1         | yes
+    ///   ST01-b     | Super dirty | 2         |
+    ///
+    ///   becomes
+    ///
+    ///   Sample Tag | Remark 3
+    ///   ST01-a     | {"Slice num":1,"DNA (Yes/No)":"yes"}
+    ///   ST01-b     | {"Remark 3":"Super dirty","Slice num":2}
+    #[arg(
+        long,
+        value_name = "FIELD",
+        num_args = 0..=1,
+        default_missing_value = "Remark 1",
+        conflicts_with = "unpivot",
+        verbatim_doc_comment
+    )]
+    extra_columns_to: Option<String>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -138,8 +169,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             values_column: arguments.values_column,
         });
     }
+    if let Some(field) = &arguments.extra_columns_to {
+        builder = builder.extra_columns_to(field);
+    }
     let mut validator = builder.build()?;
     if let Some(summary) = validator.unpivot_summary() {
+        println!("✅ {summary}");
+    }
+    if let Some(summary) = validator.extra_columns_summary() {
         println!("✅ {summary}");
     }
     if let Err(e) = validator.validate_excel() {
