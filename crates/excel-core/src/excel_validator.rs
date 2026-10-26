@@ -33,6 +33,8 @@ struct ProcessedSheet {
     unpivot_summary: Option<String>,
     /// What moving the extra columns did, when they were moved
     extra_columns_summary: Option<String>,
+    /// The markers allowed in the values field, when an unpivot sends its cells to a text field
+    values_markers: Option<ValuesMarkers>,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -138,6 +140,7 @@ pub struct ExcelValidator {
     rows: Vec<ParsedExcelRow>,
     unpivot_summary: Option<String>,
     extra_columns_summary: Option<String>,
+    values_markers: Option<ValuesMarkers>,
 }
 
 pub struct ExcelValidatorBuilder {
@@ -158,7 +161,24 @@ pub struct Unpivot {
     pub headers_column: String,
     /// The field that receives the sample column's cell value
     pub values_column: String,
+    /// The text a sample cell may hold instead of a number, when `values_column` takes text.
+    ///
+    /// A values field that takes text would otherwise accept anything, so a typo such as `<LDO`
+    /// would be uploaded as data. With a text field, every non-blank sample cell must be a
+    /// number or exactly one of these markers (after trimming); anything else is a validation
+    /// error at its source row. A numeric values field ignores the markers: its type already
+    /// refuses all text. See [`DEFAULT_VALUES_MARKERS`].
+    pub values_markers: Vec<String>,
 }
+
+/// The markers analytical results use in place of a concentration:
+/// - `<LOD`: below the limit of detection (the substance was not detected)
+/// - `<LOQ`: below the limit of quantification (detected, but too little to measure)
+/// - `NS`: no sample was taken at that station or depth
+///
+/// The limits themselves are in their own columns ("Limit of detection", "Limit of
+/// quantification"), so the markers are kept as written rather than replaced by a number.
+pub const DEFAULT_VALUES_MARKERS: [&str; 3] = ["<LOD", "<LOQ", "NS"];
 
 /// The sample columns of an unpivoted sheet and the fields they go to
 struct SampleColumns {
@@ -166,6 +186,16 @@ struct SampleColumns {
     columns: Vec<(usize, String)>,
     headers_column: String,
     values_column: String,
+    /// `Some` when `values_column` takes text; see [`Unpivot::values_markers`]
+    values_markers: Option<ValuesMarkers>,
+}
+
+/// A values field that takes text, and the markers its cells may hold besides a number
+#[derive(Clone)]
+struct ValuesMarkers {
+    field: String,
+    /// Trimmed, as the cells are
+    markers: Vec<String>,
 }
 
 /// The sheet's columns that are not data dictionary fields, and the field they are moved into
@@ -240,6 +270,7 @@ impl ExcelValidatorBuilder {
             rows: Vec::new(),
             unpivot_summary: None,
             extra_columns_summary: None,
+            values_markers: None,
         };
 
         // Process Excel rows once during build
@@ -256,6 +287,7 @@ impl ExcelValidatorBuilder {
             rows: sheet.rows,
             unpivot_summary: sheet.unpivot_summary,
             extra_columns_summary: sheet.extra_columns_summary,
+            values_markers: sheet.values_markers,
         })
     }
 }
@@ -284,6 +316,7 @@ impl ExcelValidator {
             rows: Vec::new(),
             unpivot_summary: None,
             extra_columns_summary: None,
+            values_markers: None,
         })
     }
 
@@ -848,6 +881,9 @@ impl ExcelValidator {
             ));
         }
 
+        let values_markers = samples
+            .as_ref()
+            .and_then(|samples| samples.values_markers.clone());
         let unpivot_summary = samples.map(|samples| {
             let kept_columns: Vec<(usize, &str)> = kept
                 .iter()
@@ -858,15 +894,26 @@ impl ExcelValidator {
                 .iter()
                 .map(|(i, name)| (*i, name.as_str()))
                 .collect();
+            let markers = samples
+                .values_markers
+                .map(|values| {
+                    format!(
+                        " {} takes numbers or {}.",
+                        values.field,
+                        values.markers.join(", ")
+                    )
+                })
+                .unwrap_or_default();
             format!(
-                "Keeping {} column(s) {}; unpivoting {} column(s) {} into {} / {}: {} row(s).",
+                "Keeping {} column(s) {}; unpivoting {} column(s) {} into {} / {}: {} row(s).{}",
                 kept_columns.len(),
                 column_span(&kept_columns, first_col),
                 sample_columns.len(),
                 column_span(&sample_columns, first_col),
                 samples.headers_column,
                 samples.values_column,
-                parsed_rows.len()
+                parsed_rows.len(),
+                markers
             )
         });
 
@@ -897,6 +944,7 @@ impl ExcelValidator {
             rows: parsed_rows,
             unpivot_summary,
             extra_columns_summary,
+            values_markers,
         })
     }
 
@@ -1050,6 +1098,20 @@ impl ExcelValidator {
             ));
         }
 
+        // A numeric field needs no markers: its type already refuses text
+        let values_markers = self
+            .field_schemas
+            .get(&values_column)
+            .filter(|schema| self.schema_expects_string(&schema.field_type))
+            .map(|_| ValuesMarkers {
+                field: values_column.clone(),
+                markers: unpivot
+                    .values_markers
+                    .iter()
+                    .map(|marker| marker.trim().to_string())
+                    .collect(),
+            });
+
         Ok((
             kept.iter().map(|(i, _)| *i).collect(),
             SampleColumns {
@@ -1059,6 +1121,7 @@ impl ExcelValidator {
                     .collect(),
                 headers_column,
                 values_column,
+                values_markers,
             },
         ))
     }
@@ -1801,7 +1864,10 @@ impl ExcelValidator {
         // 3. Custom Business Rule: "date" and "date-time" values must have been parsed
         errors.extend(self.custom_validator_date_formats(row_value, row_number));
 
-        // 4. Future custom validators can be added here
+        // 4. Custom Business Rule: an unpivoted text values field holds numbers or markers
+        errors.extend(self.custom_validator_values_markers(row_value, row_number));
+
+        // 5. Future custom validators can be added here
         // errors.extend(self.validate_cross_field_dependencies(row_value, row_number));
 
         errors
@@ -1903,6 +1969,34 @@ impl ExcelValidator {
                 })
             })
             .collect()
+    }
+
+    /// Custom validator: an unpivoted values field that takes text holds a number or a marker
+    ///
+    /// See [`Unpivot::values_markers`]. Blank cells are left to the field's own type and required
+    /// rules. A number is anything that parses as a finite number, so `NaN` and `inf` are refused;
+    /// cells read from Excel as numbers arrive here already written as text. Markers match
+    /// exactly, so `<lod` is not `<LOD`.
+    fn custom_validator_values_markers(
+        &self,
+        data: &Value,
+        row_number: usize,
+    ) -> Option<ValidationError> {
+        let values = self.values_markers.as_ref()?;
+        let s = data
+            .get(&values.field)?
+            .as_str()
+            .filter(|s| !s.is_empty())?;
+        let is_number = s.parse::<f64>().is_ok_and(f64::is_finite);
+        let is_marker = values.markers.iter().any(|marker| marker == s);
+        (!is_number && !is_marker).then(|| ValidationError::InvalidFormat {
+            path: format!("row[{}]./{}", row_number, values.field),
+            message: format!(
+                "'{}' is not a number or one of the markers {}",
+                s,
+                values.markers.join(", ")
+            ),
+        })
     }
 
     /// Map jsonschema's ValidationErrorKind to our explicit ValidationError types

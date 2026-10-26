@@ -18,7 +18,7 @@ pub mod writers;
 pub mod test_utils;
 
 pub use excel_validator::{
-    ExcelValidator, ExcelValidatorBuilder, FieldSchema, SchemaType, Unpivot,
+    DEFAULT_VALUES_MARKERS, ExcelValidator, ExcelValidatorBuilder, FieldSchema, SchemaType, Unpivot,
 };
 
 pub const ERRORS_LOG_FILE: &str = "errors.log";

@@ -6,18 +6,29 @@ mod common;
 use common::Cell::{self, Empty, Error, Number, Text};
 use common::{create_simple_mapping, write_test_workbook};
 use excel_core::serde_json::json;
-use excel_core::{ExcelValidatorBuilder, Unpivot};
+use excel_core::{DEFAULT_VALUES_MARKERS, ExcelValidatorBuilder, Unpivot};
 
 /// Dictionary fields: two descriptors, the two unpivot targets, and one more that is in neither the
 /// sheet nor the unpivot.
 fn schema() -> excel_core::serde_json::Value {
+    schema_with_concentration(json!({ "type": ["number", "null"] }))
+}
+
+/// The same dictionary, with "Concentration" taking text, so it can hold markers such as `<LOD`.
+fn text_schema() -> excel_core::serde_json::Value {
+    schema_with_concentration(json!({ "type": ["string", "null"] }))
+}
+
+fn schema_with_concentration(
+    concentration: excel_core::serde_json::Value,
+) -> excel_core::serde_json::Value {
     json!({
         "type": "object",
         "properties": {
             "Substance": { "type": "string" },
             "Units": { "type": ["string", "null"] },
             "Sample Tag": { "type": ["string", "null"] },
-            "Concentration": { "type": ["number", "null"] },
+            "Concentration": concentration,
             "Classification": { "type": ["string", "null"] }
         },
         "required": ["Substance"],
@@ -29,6 +40,7 @@ fn spec() -> Unpivot {
     Unpivot {
         headers_column: "Sample Tag".to_string(),
         values_column: "Concentration".to_string(),
+        values_markers: DEFAULT_VALUES_MARKERS.map(String::from).to_vec(),
     }
 }
 
@@ -40,11 +52,21 @@ struct Unpivoted {
 
 /// Build with `unpivot`, validate and export `rows` (the first row being the headers).
 fn run(name: &str, rows: &[Vec<Cell>], unpivot: Unpivot) -> Result<Unpivoted, String> {
+    run_with_schema(name, rows, unpivot, schema())
+}
+
+/// [`run`] against `schema` instead of the default dictionary.
+fn run_with_schema(
+    name: &str,
+    rows: &[Vec<Cell>],
+    unpivot: Unpivot,
+    schema: excel_core::serde_json::Value,
+) -> Result<Unpivoted, String> {
     let xlsx = write_test_workbook(name, rows);
     let csv = xlsx.with_extension("csv");
 
     let result = (|| {
-        let mut validator = ExcelValidatorBuilder::new(xlsx.to_str().unwrap(), "Sheet1", schema())
+        let mut validator = ExcelValidatorBuilder::new(xlsx.to_str().unwrap(), "Sheet1", schema)
             .unpivot(unpivot)
             .build()
             .map_err(|e| format!("{e:#}"))?;
@@ -271,4 +293,87 @@ fn excel_error_cells_are_reported_once_each() {
     assert!(err.contains("contains 2 Excel error value(s)"), "{err}");
     assert!(err.contains("row 2, column 'Units': #N/A"), "{err}");
     assert!(err.contains("row 2, column 'ST02': #DIV/0!"), "{err}");
+}
+
+/// Every outcome of a sample cell going to a values field that takes text.
+fn marker_sheet(cells: [Cell; 3]) -> Vec<Vec<Cell>> {
+    let [st01, st02, st03] = cells;
+    vec![
+        vec![
+            Text("Substance"),
+            Text("Units"),
+            Text("ST01"),
+            Text("ST02"),
+            Text("ST03"),
+        ],
+        vec![Text("Okadaic acid"), Text("ng/L"), st01, st02, st03],
+    ]
+}
+
+#[test]
+fn a_text_values_field_takes_numbers_markers_and_blanks_as_written() {
+    let mut rows = marker_sheet([Number(0.880999866251062), Text("NS "), Text("<LOD")]);
+    rows.push(vec![
+        Text("Azaspiracid-2"),
+        Text("ng/L"),
+        Text("<LOQ"),
+        Empty,
+        Text("0.5"),
+    ]);
+
+    let unpivoted = run_with_schema("unpivot-markers", &rows, spec(), text_schema()).unwrap();
+
+    let expected = vec![
+        "Substance,Units,Sample Tag,Concentration",
+        "Okadaic acid,ng/L,ST01,0.880999866251062",
+        "Okadaic acid,ng/L,ST02,NS",
+        "Okadaic acid,ng/L,ST03,<LOD",
+        "Azaspiracid-2,ng/L,ST01,<LOQ",
+        "Azaspiracid-2,ng/L,ST02,",
+        "Azaspiracid-2,ng/L,ST03,0.5",
+    ];
+    assert_eq!(unpivoted.csv_lines, expected);
+}
+
+#[test]
+fn other_text_in_a_text_values_field_is_a_validation_error_naming_the_markers() {
+    let rows = marker_sheet([Text("<LDO"), Text("<lod"), Text("NaN")]);
+
+    let err = run_with_schema("unpivot-bad-marker", &rows, spec(), text_schema()).unwrap_err();
+
+    for value in ["<LDO", "<lod", "NaN"] {
+        let expected = format!(
+            "row[2]./Concentration: '{value}' is not a number or one of the markers <LOD, <LOQ, NS"
+        );
+        assert!(err.contains(&expected), "{expected}\n{err}");
+    }
+}
+
+#[test]
+fn given_markers_replace_the_default_ones() {
+    let unpivot = Unpivot {
+        values_markers: vec!["ND".to_string()],
+        ..spec()
+    };
+    let rows = marker_sheet([Text("ND"), Text("<LOD"), Number(0.4)]);
+
+    let err = run_with_schema("unpivot-own-markers", &rows, unpivot, text_schema()).unwrap_err();
+
+    let expected = "row[2]./Concentration: '<LOD' is not a number or one of the markers ND";
+    assert!(err.contains(expected), "{err}");
+    assert!(!err.contains("'ND'"), "{err}");
+}
+
+#[test]
+fn the_summary_of_a_text_values_field_names_the_markers() {
+    let unpivoted = run_with_schema(
+        "unpivot-markers-summary",
+        &wide_sheet(),
+        spec(),
+        text_schema(),
+    )
+    .unwrap();
+
+    let expected = "Keeping 2 column(s) A-B (Substance … Units); unpivoting 2 column(s) C-D (ST01 … ST02) into Sample Tag / Concentration: 4 row(s). Concentration takes numbers or <LOD, <LOQ, NS.";
+    assert_eq!(unpivoted.summary, expected);
 }

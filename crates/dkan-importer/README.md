@@ -56,6 +56,7 @@ cargo run -- --base-url https://dkan.example.com --excel-file ./data/sample-data
 - **`--unpivot`** (optional) - Unpivot the sheet: one row per sample cell. Requires `--headers-column`. See [Unpivoting a wide sheet](#unpivoting-a-wide-sheet)
 - **`--headers-column`** (with `--unpivot` only) - The data dictionary field that receives each sample column's header
 - **`--values-column`** (with `--unpivot` only) - The data dictionary field that receives each sample cell's value (defaults to "Concentration")
+- **`--values-markers`** (with `--unpivot` only) - The text a sample cell may hold instead of a number when the values column is a text field (defaults to `<LOD` `<LOQ` `NS`). See [Markers instead of numbers](#markers-instead-of-numbers)
 - **`--extra-columns-to [FIELD]`** (optional, not with `--unpivot`) - Move the columns that are not data dictionary fields into FIELD as JSON instead of refusing them (FIELD defaults to "Remark 1"). See [Keeping extra columns](#keeping-extra-columns)
 
 ### Unpivoting a wide sheet
@@ -85,6 +86,22 @@ Okadaic acid   | ST02_Surface | 0.40
 - The run also stops, before anything is written or uploaded, if the sheet does not start with data dictionary fields, has no sample columns, or has a data dictionary field among the sample columns.
 - Before validating, it prints what it will do, for example: `Keeping 9 column(s) A-I (Anal. Method Serial No. … Limit of quantification); unpivoting 74 column(s) J-CE (ST01_Surface … ST41_Bottom) into Sample Tag / Concentration: 518 row(s).`
 - Validation errors name the source row. The row data in `errors.log` includes the sample column's header.
+
+#### Markers instead of numbers
+
+Some results are not numbers: `<LOD` (below the limit of detection), `<LOQ` (below the limit of quantification) or `NS` (no sample). The limits themselves are in their own columns, so these markers are kept as written. That needs a values column that is a text field (`string`) in the data dictionary. A number field refuses them as type mismatches.
+
+A text field would accept any text, so the importer checks every non-blank sample cell: it must be a number or exactly one of the `--values-markers`. Anything else, such as `<LDO`, `<lod` or `n.d.`, is a validation error at its source row:
+
+```
+Invalid format at row[2]./Concentration: '<LDO' is not a number or one of the markers <LOD, <LOQ, NS
+```
+
+- The default markers are `<LOD`, `<LOQ` and `NS`. Giving `--values-markers` replaces them, so list all of them: `--values-markers "<LOD" "<LOQ" "NS" "ND"`.
+- Markers are case-sensitive. Spaces around a cell's text are ignored, so `NS ` is `NS`.
+- Numbers are uploaded as Excel stores them (`0.880999866251062`), and blank cells are uploaded empty.
+- With a number field the markers are not used, because the field already refuses all text.
+- The summary line ends with the rule, for example `... 518 row(s). Concentration takes numbers or <LOD, <LOQ, NS.`
 
 ### Keeping extra columns
 

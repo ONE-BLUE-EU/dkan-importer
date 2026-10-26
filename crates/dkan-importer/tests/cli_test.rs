@@ -57,6 +57,31 @@ fn values_column_without_unpivot_is_refused() {
 }
 
 #[test]
+fn values_markers_without_unpivot_is_refused() {
+    let output = run(&["--values-markers", "ND"]);
+
+    assert_usage_error(&output, "--unpivot");
+}
+
+/// Several markers follow one flag, and the run gets past the arguments to the login check.
+#[test]
+fn unpivot_with_several_values_markers_is_accepted() {
+    let output = run(&[
+        "--unpivot",
+        "--headers-column",
+        "Sample Tag",
+        "--values-markers",
+        "ND",
+        "<LOD",
+    ]);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let expected_exit_code = Some(1);
+    assert_eq!(output.status.code(), expected_exit_code, "{stderr}");
+    assert!(stderr.contains("/api/importer/upload"), "{stderr}");
+}
+
+#[test]
 fn unpivot_without_headers_column_is_refused() {
     let output = run(&["--unpivot"]);
 
@@ -99,6 +124,14 @@ fn help_groups_the_unpivot_flags_with_their_default_and_an_example() {
     );
     assert!(
         unpivot_section.contains("[default: Concentration]"),
+        "{help}"
+    );
+    assert!(
+        unpivot_section.contains("--values-markers <MARKER>..."),
+        "{help}"
+    );
+    assert!(
+        unpivot_section.contains("[default: <LOD <LOQ NS]"),
         "{help}"
     );
     assert!(

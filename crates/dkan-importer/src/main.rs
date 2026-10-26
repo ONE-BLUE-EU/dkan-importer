@@ -12,7 +12,7 @@ use dkan_importer::{
     },
 };
 use excel_core::reqwest::blocking::Client;
-use excel_core::{ExcelValidatorBuilder, Unpivot};
+use excel_core::{DEFAULT_VALUES_MARKERS, ExcelValidatorBuilder, Unpivot};
 use rpassword::prompt_password;
 
 #[derive(Parser)]
@@ -99,6 +99,36 @@ struct Args {
     )]
     values_column: String,
 
+    /// The text a sample cell may hold instead of a number, when the values
+    /// column is a text field. Only with --unpivot.
+    ///
+    /// Analytical results do not always have a number: a substance can be
+    /// below the limit of detection (<LOD) or of quantification (<LOQ), or no
+    /// sample was taken (NS). Keeping these as written needs a values column
+    /// that takes text, but a text field accepts anything, so a typo such as
+    /// "<LDO" or "n.d." would be uploaded as data. With this option, each
+    /// non-blank sample cell must be a number or exactly one of these markers
+    /// (case-sensitive, surrounding spaces ignored). Anything else is a
+    /// validation error, listed with its row in errors.log.
+    ///
+    /// Giving markers replaces the default ones; list all you need after one
+    /// flag. If the values column is a number field, the markers are not used:
+    /// the field already refuses all text, including these markers.
+    ///
+    /// Example:
+    ///   dkan-importer ... --unpivot --headers-column "Sample Tag" \
+    ///     --values-markers "<LOD" "<LOQ" "NS" "ND"
+    #[arg(
+        long,
+        value_name = "MARKER",
+        num_args = 1..,
+        default_values = DEFAULT_VALUES_MARKERS,
+        requires = "unpivot",
+        help_heading = "Unpivot",
+        verbatim_doc_comment
+    )]
+    values_markers: Vec<String>,
+
     /// Move the sheet's columns that are not data dictionary fields into FIELD
     /// as JSON, instead of refusing them. [default when given alone: Remark 1]
     ///
@@ -167,6 +197,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         builder = builder.unpivot(Unpivot {
             headers_column,
             values_column: arguments.values_column,
+            values_markers: arguments.values_markers,
         });
     }
     if let Some(field) = &arguments.extra_columns_to {
