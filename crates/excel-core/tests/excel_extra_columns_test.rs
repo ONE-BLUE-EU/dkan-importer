@@ -216,6 +216,7 @@ fn moving_extra_columns_and_unpivoting_together_is_refused() {
             headers_column: "Remark 2".to_string(),
             values_column: "Depth".to_string(),
             values_markers: Vec::new(),
+            marker_limits: Vec::new(),
         })
         .build();
     let _ = std::fs::remove_file(&xlsx);

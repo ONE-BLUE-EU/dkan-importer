@@ -12,7 +12,9 @@ use dkan_importer::{
     },
 };
 use excel_core::reqwest::blocking::Client;
-use excel_core::{DEFAULT_VALUES_MARKERS, ExcelValidatorBuilder, Unpivot};
+use excel_core::{
+    DEFAULT_MARKER_LIMITS, DEFAULT_VALUES_MARKERS, ExcelValidatorBuilder, MarkerLimit, Unpivot,
+};
 use rpassword::prompt_password;
 
 #[derive(Parser)]
@@ -129,6 +131,34 @@ struct Args {
     )]
     values_markers: Vec<String>,
 
+    /// The markers that may be followed by their limit, as MARKER=FIELD.
+    ///
+    /// Some sheets write the limit after the marker, as in "<LOQ:0.25". The
+    /// limit is already in its own column, so when the number after the
+    /// marker equals FIELD in the same row, the cell is uploaded as the marker
+    /// alone ("<LOQ"), the same as in sheets without the number. A different
+    /// number, or a row with FIELD blank, is a validation error: no number is
+    /// dropped that the row does not keep.
+    ///
+    /// Giving limits replaces the default ones. A limit for a marker that is
+    /// not one of --values-markers does not apply. FIELD must be a data
+    /// dictionary field.
+    ///
+    /// Example:
+    ///   dkan-importer ... --unpivot --headers-column "Sample Tag" \
+    ///     --marker-limits "<LOQ=Limit of quantification"
+    #[arg(
+        long,
+        value_name = "MARKER=FIELD",
+        num_args = 1..,
+        default_values = DEFAULT_MARKER_LIMITS,
+        value_parser = clap::value_parser!(MarkerLimit),
+        requires = "unpivot",
+        help_heading = "Unpivot",
+        verbatim_doc_comment
+    )]
+    marker_limits: Vec<MarkerLimit>,
+
     /// Move the sheet's columns that are not data dictionary fields into FIELD
     /// as JSON, instead of refusing them. [default when given alone: Remark 1]
     ///
@@ -198,6 +228,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             headers_column,
             values_column: arguments.values_column,
             values_markers: arguments.values_markers,
+            marker_limits: arguments.marker_limits,
         });
     }
     if let Some(field) = &arguments.extra_columns_to {

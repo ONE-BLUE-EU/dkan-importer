@@ -169,7 +169,51 @@ pub struct Unpivot {
     /// error at its source row. A numeric values field ignores the markers: its type already
     /// refuses all text. See [`DEFAULT_VALUES_MARKERS`].
     pub values_markers: Vec<String>,
+    /// The markers that may be followed by their limit, and the field holding that limit.
+    ///
+    /// Some sheets write the limit after the marker, as in `<LOQ:0.25`. The limit is already in
+    /// its own field, so when the number after the marker equals that field in the same row, the
+    /// cell is written as the marker alone (`<LOQ`) and reads the same as in sheets that never had
+    /// the number. Any other number, or a row without the limit, is a validation error, so no
+    /// number is ever dropped that the row does not keep. A limit for a marker that is not in
+    /// `values_markers` does not apply. Ignored with a numeric values field, like the markers.
+    /// See [`DEFAULT_MARKER_LIMITS`].
+    pub marker_limits: Vec<MarkerLimit>,
 }
+
+/// A values marker that may be followed by a limit, and the data dictionary field holding it;
+/// see [`Unpivot::marker_limits`]. Read from `MARKER=FIELD`, as in
+/// `<LOQ=Limit of quantification`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MarkerLimit {
+    pub marker: String,
+    pub limit_field: String,
+}
+
+impl std::str::FromStr for MarkerLimit {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let (marker, field) = s
+            .split_once('=')
+            .map(|(marker, field)| (marker.trim(), normalize_string(field)))
+            .filter(|(marker, field)| !marker.is_empty() && !field.is_empty())
+            .ok_or_else(|| {
+                format!(
+                    "expected MARKER=FIELD, such as \"<LOQ=Limit of quantification\"; got \"{s}\""
+                )
+            })?;
+        Ok(MarkerLimit {
+            marker: marker.to_string(),
+            limit_field: field,
+        })
+    }
+}
+
+/// The limit columns analytical results sheets have for [`DEFAULT_VALUES_MARKERS`], as
+/// `MARKER=FIELD`. `NS` has no limit.
+pub const DEFAULT_MARKER_LIMITS: [&str; 2] =
+    ["<LOD=Limit of detection", "<LOQ=Limit of quantification"];
 
 /// The markers analytical results use in place of a concentration:
 /// - `<LOD`: below the limit of detection (the substance was not detected)
@@ -196,6 +240,56 @@ struct ValuesMarkers {
     field: String,
     /// Trimmed, as the cells are
     markers: Vec<String>,
+    /// The limits of the markers in `markers`, each in a dictionary field
+    limits: Vec<MarkerLimit>,
+}
+
+/// What a cell made of a marker and a number is; see [`Unpivot::marker_limits`]
+enum MarkerWithLimit<'a> {
+    /// The number is the row's limit: write the marker alone
+    Matches(&'a str),
+    /// Why the number is refused
+    Refused(String),
+}
+
+impl ValuesMarkers {
+    /// `None` when `value` is not a marker with a limit followed by `:`.
+    fn marker_with_limit(
+        &self,
+        value: &str,
+        row: &Map<String, Value>,
+    ) -> Option<MarkerWithLimit<'_>> {
+        self.limits.iter().find_map(|limit| {
+            let number = value
+                .strip_prefix(limit.marker.as_str())?
+                .trim_start()
+                .strip_prefix(':')?
+                .trim();
+            let row_limit = match row.get(&limit.limit_field) {
+                Some(Value::Number(n)) => n.as_f64(),
+                Some(Value::String(s)) => s.trim().parse::<f64>().ok(),
+                _ => None,
+            }
+            .filter(|n| n.is_finite());
+            let Some(row_limit) = row_limit else {
+                return Some(MarkerWithLimit::Refused(format!(
+                    "'{}' has a number, but the row has no {}",
+                    value, limit.limit_field
+                )));
+            };
+            let matches = number
+                .parse::<f64>()
+                .is_ok_and(|n| (n - row_limit).abs() <= 1e-9 * n.abs().max(row_limit.abs()));
+            Some(if matches {
+                MarkerWithLimit::Matches(limit.marker.as_str())
+            } else {
+                MarkerWithLimit::Refused(format!(
+                    "'{}' does not end with the row's {} ({}); write '{}' or '{}:{}'",
+                    value, limit.limit_field, row_limit, limit.marker, limit.marker, row_limit
+                ))
+            })
+        })
+    }
 }
 
 /// The sheet's columns that are not data dictionary fields, and the field they are moved into
@@ -702,6 +796,8 @@ impl ExcelValidator {
         let mut samples: Option<SampleColumns> = None;
         let mut extras: Option<ExtraColumns> = None;
         let mut rows_with_extra_data: usize = 0;
+        // Sample cells such as `<LOQ:0.25` written as the marker alone
+        let mut markers_without_limit: usize = 0;
         let mut parsed_rows: Vec<ParsedExcelRow> = Vec::new();
         // Excel error values (#N/A, #DIV/0!, ...) are broken cells, not data: collect them all
         let mut error_cells: Vec<String> = Vec::new();
@@ -852,10 +948,20 @@ impl ExcelValidator {
                     samples.headers_column.clone(),
                     Value::String(header.clone()),
                 );
-                sample_obj.insert(
-                    samples.values_column.clone(),
-                    self.convert_cell_to_json_with_schema_awareness(cell, &samples.values_column),
-                );
+                let mut value =
+                    self.convert_cell_to_json_with_schema_awareness(cell, &samples.values_column);
+                let marker = samples.values_markers.as_ref().and_then(|values| {
+                    match values.marker_with_limit(value.as_str()?, &json_obj)? {
+                        MarkerWithLimit::Matches(marker) => Some(marker),
+                        // Left as written, for the validator to report
+                        MarkerWithLimit::Refused(_) => None,
+                    }
+                });
+                if let Some(marker) = marker {
+                    value = Value::String(marker.to_string());
+                    markers_without_limit = markers_without_limit.saturating_add(1);
+                }
+                sample_obj.insert(samples.values_column.clone(), value);
                 parsed_rows.push((row_number, sample_obj));
             }
         }
@@ -897,10 +1003,25 @@ impl ExcelValidator {
             let markers = samples
                 .values_markers
                 .map(|values| {
+                    let limits = if markers_without_limit > 0 {
+                        format!(
+                            " {} value(s) written as their marker alone, the number after it being the row's limit: {}.",
+                            markers_without_limit,
+                            values
+                                .limits
+                                .iter()
+                                .map(|l| format!("{} ({})", l.marker, l.limit_field))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    } else {
+                        String::new()
+                    };
                     format!(
-                        " {} takes numbers or {}.",
+                        " {} takes numbers or {}.{}",
                         values.field,
-                        values.markers.join(", ")
+                        values.markers.join(", "),
+                        limits
                     )
                 })
                 .unwrap_or_default();
@@ -1110,7 +1231,30 @@ impl ExcelValidator {
                     .iter()
                     .map(|marker| marker.trim().to_string())
                     .collect(),
+                limits: Vec::new(),
+            })
+            .map(|mut values| {
+                // A limit applies only to a marker in use, so the default limits do not stand in
+                // the way of other markers
+                values.limits = unpivot
+                    .marker_limits
+                    .iter()
+                    .filter(|limit| values.markers.contains(&limit.marker))
+                    .cloned()
+                    .collect();
+                values
             });
+        if let Some(values) = &values_markers {
+            for limit in &values.limits {
+                if !self.field_schemas.contains_key(&limit.limit_field) {
+                    return Err(anyhow::anyhow!(
+                        "The limit field \"{}\" for \"{}\" is not a data dictionary field.",
+                        limit.limit_field,
+                        limit.marker
+                    ));
+                }
+            }
+        }
 
         Ok((
             kept.iter().map(|(i, _)| *i).collect(),
@@ -1989,13 +2133,24 @@ impl ExcelValidator {
             .filter(|s| !s.is_empty())?;
         let is_number = s.parse::<f64>().is_ok_and(f64::is_finite);
         let is_marker = values.markers.iter().any(|marker| marker == s);
-        (!is_number && !is_marker).then(|| ValidationError::InvalidFormat {
-            path: format!("row[{}]./{}", row_number, values.field),
-            message: format!(
+        if is_number || is_marker {
+            return None;
+        }
+        // A marker followed by the row's limit was written as the marker alone while reading
+        let message = match data
+            .as_object()
+            .and_then(|row| values.marker_with_limit(s, row))
+        {
+            Some(MarkerWithLimit::Refused(message)) => message,
+            _ => format!(
                 "'{}' is not a number or one of the markers {}",
                 s,
                 values.markers.join(", ")
             ),
+        };
+        Some(ValidationError::InvalidFormat {
+            path: format!("row[{}]./{}", row_number, values.field),
+            message,
         })
     }
 

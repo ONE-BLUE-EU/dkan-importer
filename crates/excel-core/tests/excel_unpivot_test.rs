@@ -6,9 +6,11 @@ mod common;
 use common::Cell::{self, Empty, Error, Number, Text};
 use common::{create_simple_mapping, write_test_workbook};
 use excel_core::serde_json::json;
-use excel_core::{DEFAULT_VALUES_MARKERS, ExcelValidatorBuilder, Unpivot};
+use excel_core::{
+    DEFAULT_MARKER_LIMITS, DEFAULT_VALUES_MARKERS, ExcelValidatorBuilder, MarkerLimit, Unpivot,
+};
 
-/// Dictionary fields: two descriptors, the two unpivot targets, and one more that is in neither the
+/// Dictionary fields: two descriptors, the two unpivot targets, two limits, and one more that is in neither the
 /// sheet nor the unpivot.
 fn schema() -> excel_core::serde_json::Value {
     schema_with_concentration(json!({ "type": ["number", "null"] }))
@@ -29,6 +31,8 @@ fn schema_with_concentration(
             "Units": { "type": ["string", "null"] },
             "Sample Tag": { "type": ["string", "null"] },
             "Concentration": concentration,
+            "Limit of detection": { "type": ["number", "null"] },
+            "Limit of quantification": { "type": ["number", "null"] },
             "Classification": { "type": ["string", "null"] }
         },
         "required": ["Substance"],
@@ -41,6 +45,10 @@ fn spec() -> Unpivot {
         headers_column: "Sample Tag".to_string(),
         values_column: "Concentration".to_string(),
         values_markers: DEFAULT_VALUES_MARKERS.map(String::from).to_vec(),
+        marker_limits: DEFAULT_MARKER_LIMITS
+            .iter()
+            .map(|limit| limit.parse().unwrap())
+            .collect(),
     }
 }
 
@@ -85,7 +93,14 @@ fn run_with_schema(
         validator
             .export_to_csv(
                 csv.to_str().unwrap(),
-                create_simple_mapping(vec!["Substance", "Units", "Sample Tag", "Concentration"]),
+                create_simple_mapping(vec![
+                    "Substance",
+                    "Units",
+                    "Limit of detection",
+                    "Limit of quantification",
+                    "Sample Tag",
+                    "Concentration",
+                ]),
             )
             .map_err(|e| e.to_string())?;
         let csv_lines = std::fs::read_to_string(&csv)
@@ -177,7 +192,7 @@ fn a_headers_column_that_is_not_a_dictionary_field_is_refused_with_the_candidate
 
     assert!(err.contains("headers column \"Sample\""), "{err}");
     assert!(
-        err.contains("Candidates: Classification, Concentration, Sample Tag"),
+        err.contains("Candidates: Classification, Concentration, Limit of detection, Limit of quantification, Sample Tag"),
         "{err}"
     );
 }
@@ -194,7 +209,7 @@ fn a_values_column_that_is_already_a_sheet_column_is_refused_with_the_candidates
 
     assert!(err.contains("values column \"Units\""), "{err}");
     assert!(
-        err.contains("Candidates: Classification, Concentration, Sample Tag"),
+        err.contains("Candidates: Classification, Concentration, Limit of detection, Limit of quantification, Sample Tag"),
         "{err}"
     );
 }
@@ -376,4 +391,169 @@ fn the_summary_of_a_text_values_field_names_the_markers() {
 
     let expected = "Keeping 2 column(s) A-B (Substance … Units); unpivoting 2 column(s) C-D (ST01 … ST02) into Sample Tag / Concentration: 4 row(s). Concentration takes numbers or <LOD, <LOQ, NS.";
     assert_eq!(unpivoted.summary, expected);
+}
+
+/// A row with both limits and three sample cells: `cells` for an LOD of 0.1 and an LOQ of `loq`.
+fn limits_sheet(loq: Cell, cells: [Cell; 3]) -> Vec<Vec<Cell>> {
+    let [st01, st02, st03] = cells;
+    vec![
+        vec![
+            Text("Substance"),
+            Text("Limit of detection"),
+            Text("Limit of quantification"),
+            Text("ST01"),
+            Text("ST02"),
+            Text("ST03"),
+        ],
+        vec![Text("Okadaic acid"), Number(0.1), loq, st01, st02, st03],
+    ]
+}
+
+#[test]
+fn a_marker_followed_by_the_rows_limit_is_written_as_the_marker() {
+    let rows = limits_sheet(
+        Number(0.25),
+        [Text("<LOQ:0.25"), Text("<LOD : 0.100"), Number(0.3)],
+    );
+
+    let unpivoted = run_with_schema("unpivot-limit-match", &rows, spec(), text_schema()).unwrap();
+
+    let expected = vec![
+        "Substance,Limit of detection,Limit of quantification,Sample Tag,Concentration",
+        "Okadaic acid,0.1,0.25,ST01,<LOQ",
+        "Okadaic acid,0.1,0.25,ST02,<LOD",
+        "Okadaic acid,0.1,0.25,ST03,0.3",
+    ];
+    assert_eq!(unpivoted.csv_lines, expected);
+    let expected_summary = "Concentration takes numbers or <LOD, <LOQ, NS. 2 value(s) written as their marker alone, the number after it being the row's limit: <LOD (Limit of detection), <LOQ (Limit of quantification).";
+    assert!(
+        unpivoted.summary.ends_with(expected_summary),
+        "{}",
+        unpivoted.summary
+    );
+}
+
+#[test]
+fn without_such_values_the_summary_does_not_mention_limits() {
+    let rows = limits_sheet(Number(0.25), [Text("<LOQ"), Text("NS"), Number(0.3)]);
+
+    let unpivoted = run_with_schema("unpivot-limit-none", &rows, spec(), text_schema()).unwrap();
+
+    assert!(
+        unpivoted
+            .summary
+            .ends_with("Concentration takes numbers or <LOD, <LOQ, NS."),
+        "{}",
+        unpivoted.summary
+    );
+}
+
+#[test]
+fn a_marker_followed_by_another_number_is_a_validation_error_naming_the_rows_limit() {
+    let rows = limits_sheet(
+        Number(0.25),
+        [Text("<LOQ:0.3"), Text("<LOQ:abc"), Text("<LOQ:0.25")],
+    );
+
+    let err = run_with_schema("unpivot-limit-mismatch", &rows, spec(), text_schema()).unwrap_err();
+
+    for value in ["<LOQ:0.3", "<LOQ:abc"] {
+        let expected = format!(
+            "row[2]./Concentration: '{value}' does not end with the row's Limit of quantification (0.25)"
+        );
+        assert!(err.contains(&expected), "{expected}\n{err}");
+    }
+    assert!(!err.contains("row[2]./Concentration: '<LOQ:0.25'"), "{err}");
+}
+
+#[test]
+fn a_marker_followed_by_a_number_in_a_row_without_its_limit_is_a_validation_error() {
+    let rows = limits_sheet(Empty, [Text("<LOQ:0.25"), Text("<LOQ"), Number(0.3)]);
+
+    let err = run_with_schema("unpivot-limit-blank", &rows, spec(), text_schema()).unwrap_err();
+
+    let expected = "row[2]./Concentration: '<LOQ:0.25' has a number, but the row has no Limit of quantification";
+    assert!(err.contains(expected), "{err}");
+}
+
+/// Only markers given a limit take a number after them.
+#[test]
+fn a_marker_without_a_limit_followed_by_a_number_is_a_validation_error() {
+    let rows = limits_sheet(Number(0.25), [Text("NS:0.25"), Text("NS"), Number(0.3)]);
+
+    let err = run_with_schema("unpivot-limit-ns", &rows, spec(), text_schema()).unwrap_err();
+
+    let expected =
+        "row[2]./Concentration: 'NS:0.25' is not a number or one of the markers <LOD, <LOQ, NS";
+    assert!(err.contains(expected), "{err}");
+}
+
+#[test]
+fn a_limit_that_is_not_a_dictionary_field_is_refused() {
+    let unpivot = Unpivot {
+        marker_limits: vec!["<LOQ=Limit of quant".parse().unwrap()],
+        ..spec()
+    };
+    let rows = limits_sheet(Number(0.25), [Text("<LOQ"), Text("NS"), Number(0.3)]);
+
+    let err = run_with_schema("unpivot-limit-unknown", &rows, unpivot, text_schema()).unwrap_err();
+
+    assert!(err.contains("\"Limit of quant\""), "{err}");
+    assert!(err.contains("not a data dictionary field"), "{err}");
+}
+
+/// The default limits do not stand in the way of other markers, and do not apply without theirs.
+#[test]
+fn a_limit_for_a_marker_that_is_not_a_values_marker_does_not_apply() {
+    let unpivot = Unpivot {
+        values_markers: vec!["NS".to_string()],
+        ..spec()
+    };
+    let rows = limits_sheet(Number(0.25), [Text("NS"), Text("<LOQ:0.25"), Number(0.3)]);
+
+    let err = run_with_schema("unpivot-limit-marker", &rows, unpivot, text_schema()).unwrap_err();
+
+    let expected = "row[2]./Concentration: '<LOQ:0.25' is not a number or one of the markers NS";
+    assert!(err.contains(expected), "{err}");
+}
+
+/// A number values field takes no markers, so the limits are not checked either.
+#[test]
+fn a_number_values_field_ignores_the_limits() {
+    let unpivot = Unpivot {
+        marker_limits: vec!["<LOQ=Limit of quant".parse().unwrap()],
+        ..spec()
+    };
+    let rows = limits_sheet(Number(0.25), [Number(0.1), Number(0.2), Number(0.3)]);
+
+    let unpivoted = run_with_schema(
+        "unpivot-limit-number",
+        &rows,
+        unpivot,
+        schema_with_concentration(json!({ "type": ["number", "null"] })),
+    )
+    .unwrap();
+
+    let expected = "Okadaic acid,0.1,0.25,ST03,0.3";
+    assert!(
+        unpivoted.csv_lines.iter().any(|l| l == expected),
+        "{:?}",
+        unpivoted.csv_lines
+    );
+}
+
+#[test]
+fn a_marker_limit_is_read_from_marker_equals_field() {
+    let limit: MarkerLimit = " <LOQ = Limit of quantification ".parse().unwrap();
+
+    assert_eq!(limit.marker, "<LOQ");
+    assert_eq!(limit.limit_field, "Limit of quantification");
+}
+
+#[test]
+fn a_marker_limit_without_both_sides_is_refused() {
+    for text in ["<LOQ", "<LOQ=", "=Limit of quantification", " = "] {
+        let result = text.parse::<MarkerLimit>();
+        assert!(result.is_err(), "{text}");
+    }
 }

@@ -57,6 +57,7 @@ cargo run -- --base-url https://dkan.example.com --excel-file ./data/sample-data
 - **`--headers-column`** (with `--unpivot` only) - The data dictionary field that receives each sample column's header
 - **`--values-column`** (with `--unpivot` only) - The data dictionary field that receives each sample cell's value (defaults to "Concentration")
 - **`--values-markers`** (with `--unpivot` only) - The text a sample cell may hold instead of a number when the values column is a text field (defaults to `<LOD` `<LOQ` `NS`). See [Markers instead of numbers](#markers-instead-of-numbers)
+- **`--marker-limits`** (with `--unpivot` only) - The markers that may be followed by their limit, as `MARKER=FIELD` (defaults to `"<LOD=Limit of detection"` `"<LOQ=Limit of quantification"`). See [A marker followed by its limit](#a-marker-followed-by-its-limit)
 - **`--extra-columns-to [FIELD]`** (optional, not with `--unpivot`) - Move the columns that are not data dictionary fields into FIELD as JSON instead of refusing them (FIELD defaults to "Remark 1"). See [Keeping extra columns](#keeping-extra-columns)
 
 ### Unpivoting a wide sheet
@@ -102,6 +103,21 @@ Invalid format at row[2]./Concentration: '<LDO' is not a number or one of the ma
 - Numbers are uploaded as Excel stores them (`0.880999866251062`), and blank cells are uploaded empty.
 - With a number field the markers are not used, because the field already refuses all text.
 - The summary line ends with the rule, for example `... 518 row(s). Concentration takes numbers or <LOD, <LOQ, NS.`
+
+#### A marker followed by its limit
+
+Some sheets write the limit after the marker, as in `<LOQ:0.25`, although the same row already has it in its "Limit of quantification" column. When the number after the marker equals the row's limit, the cell is uploaded as the marker alone (`<LOQ`), the same as in sheets without the number. Spaces around the `:` are ignored, and numbers compare as numbers, so `<LOQ : 0.250` matches a limit of `0.25`.
+
+A different number, or a row whose limit is blank, is a validation error, so no number is dropped that the row does not keep:
+
+```
+Invalid format at row[2]./Concentration: '<LOQ:0.3' does not end with the row's Limit of quantification (0.25); write '<LOQ' or '<LOQ:0.25'
+Invalid format at row[3]./Concentration: '<LOQ:0.25' has a number, but the row has no Limit of quantification
+```
+
+- The default limits are `"<LOD=Limit of detection"` and `"<LOQ=Limit of quantification"`. Giving `--marker-limits` replaces them. `NS`, or any marker without a limit, takes no number.
+- A limit for a marker that is not one of the `--values-markers` does not apply. Its field must be a data dictionary field, or the run stops before reading any rows.
+- The summary line counts the cells written as the marker alone, for example `... Concentration takes numbers or <LOD, <LOQ, NS. 375 value(s) written as their marker alone, the number after it being the row's limit: <LOD (Limit of detection), <LOQ (Limit of quantification).`
 
 ### Keeping extra columns
 

@@ -82,6 +82,44 @@ fn unpivot_with_several_values_markers_is_accepted() {
 }
 
 #[test]
+fn marker_limits_without_unpivot_is_refused() {
+    let output = run(&["--marker-limits", "<LOQ=Limit of quantification"]);
+
+    assert_usage_error(&output, "--unpivot");
+}
+
+#[test]
+fn a_marker_limit_without_a_field_is_refused() {
+    let output = run(&[
+        "--unpivot",
+        "--headers-column",
+        "Sample Tag",
+        "--marker-limits",
+        "<LOQ",
+    ]);
+
+    assert_usage_error(&output, "expected MARKER=FIELD");
+}
+
+/// Several limits follow one flag, and the run gets past the arguments to the login check.
+#[test]
+fn unpivot_with_several_marker_limits_is_accepted() {
+    let output = run(&[
+        "--unpivot",
+        "--headers-column",
+        "Sample Tag",
+        "--marker-limits",
+        "<LOQ=Limit of quantification",
+        "<LOD=Limit of detection",
+    ]);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let expected_exit_code = Some(1);
+    assert_eq!(output.status.code(), expected_exit_code, "{stderr}");
+    assert!(stderr.contains("/api/importer/upload"), "{stderr}");
+}
+
+#[test]
 fn unpivot_without_headers_column_is_refused() {
     let output = run(&["--unpivot"]);
 
@@ -132,6 +170,15 @@ fn help_groups_the_unpivot_flags_with_their_default_and_an_example() {
     );
     assert!(
         unpivot_section.contains("[default: <LOD <LOQ NS]"),
+        "{help}"
+    );
+    assert!(
+        unpivot_section.contains("--marker-limits <MARKER=FIELD>..."),
+        "{help}"
+    );
+    assert!(
+        unpivot_section
+            .contains("[default: \"<LOD=Limit of detection\" \"<LOQ=Limit of quantification\"]"),
         "{help}"
     );
     assert!(
