@@ -228,7 +228,7 @@ pub const DEFAULT_VALUES_MARKERS: [&str; 3] = ["<LOD", "<LOQ", "NS"];
 /// instead, so that one meaning is written one way across datasets. They are refused, even
 /// when given on purpose, both as values markers and in sample cells (also when followed by
 /// `:` and a limit, as in `<LQ:0.25`). Matched ignoring case.
-const REPLACED_MARKERS: [(&str, &str); 2] = [("ND", "NS"), ("<LQ", "<LOQ")];
+const REPLACED_MARKERS: [(&str, &str); 3] = [("ND", "NS"), ("<LQ", "<LOQ"), ("NQ", "<LOQ")];
 
 /// The marker that replaces `value`, when it is one of [`REPLACED_MARKERS`], alone or followed
 /// by `:`
