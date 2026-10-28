@@ -226,14 +226,22 @@ pub const DEFAULT_VALUES_MARKERS: [&str; 3] = ["<LOD", "<LOQ", "NS"];
 
 /// Markers some sheets use for a meaning that already has a marker, and the marker to write
 /// instead, so that one meaning is written one way across datasets. They are refused, even
-/// when given on purpose, both as values markers and in sample cells. Matched ignoring case.
-const REPLACED_MARKERS: [(&str, &str); 1] = [("ND", "NS")];
+/// when given on purpose, both as values markers and in sample cells (also when followed by
+/// `:` and a limit, as in `<LQ:0.25`). Matched ignoring case.
+const REPLACED_MARKERS: [(&str, &str); 2] = [("ND", "NS"), ("<LQ", "<LOQ")];
 
-/// The marker that replaces `value`, when it is one of [`REPLACED_MARKERS`]
+/// The marker that replaces `value`, when it is one of [`REPLACED_MARKERS`], alone or followed
+/// by `:`
 fn replaced_marker(value: &str) -> Option<(&'static str, &'static str)> {
-    REPLACED_MARKERS
-        .into_iter()
-        .find(|(old, _)| old.eq_ignore_ascii_case(value.trim()))
+    let value = value.trim();
+    REPLACED_MARKERS.into_iter().find(|(old, _)| {
+        let rest = value
+            .get(..old.len())
+            .filter(|start| start.eq_ignore_ascii_case(old))
+            .and_then(|_| value.get(old.len()..))
+            .map(str::trim_start);
+        rest.is_some_and(|rest| rest.is_empty() || rest.starts_with(':'))
+    })
 }
 
 /// A values marker as given, trimmed. Refuses a marker that another one replaces, such as `ND`

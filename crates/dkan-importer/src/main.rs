@@ -115,10 +115,10 @@ struct Args {
     /// validation error, listed with its row in errors.log.
     ///
     /// Giving markers replaces the default ones; list all you need after one
-    /// flag. ND is refused, even when given here: it maps to NS, so change it
-    /// to NS in the source file, for consistency. If the values column is a
-    /// number field, the markers are not used: the field already refuses all
-    /// text, including these markers.
+    /// flag. ND and <LQ are refused, even when given here: they map to NS and
+    /// <LOQ, so change them in the source file, for consistency. If the values
+    /// column is a number field, the markers are not used: the field already
+    /// refuses all text, including these markers.
     ///
     /// Example:
     ///   dkan-importer ... --unpivot --headers-column "Sample Tag" \

@@ -99,7 +99,7 @@ Invalid format at row[2]./Concentration: '<LDO' is not a number or one of the ma
 ```
 
 - The default markers are `<LOD`, `<LOQ` and `NS`. Giving `--values-markers` replaces them, so list all of them: `--values-markers "<LOD" "<LOQ" "NS" "<MDL"`.
-- `ND` is refused, even when given in `--values-markers`: it maps to `NS`, so change it to `NS` in the source file, for consistency. A sample cell with `ND` (any case) is a validation error saying so: `'ND' is not allowed: ND maps to NS. Change it to NS in the source file, for consistency.`
+- `ND` and `<LQ` are refused, even when given in `--values-markers`: they map to `NS` and `<LOQ`, so change them in the source file, for consistency. A sample cell with either (any case, `<LQ` also with a limit, as in `<LQ:0.25`) is a validation error saying so: `'ND' is not allowed: ND maps to NS. Change it to NS in the source file, for consistency.`
 - Markers are case-sensitive. Spaces around a cell's text are ignored, so `NS ` is `NS`.
 - Numbers are uploaded as Excel stores them (`0.880999866251062`), and blank cells are uploaded empty.
 - With a number field the markers are not used, because the field already refuses all text.

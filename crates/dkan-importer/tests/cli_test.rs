@@ -100,6 +100,22 @@ fn nd_as_a_values_marker_is_refused_pointing_to_ns() {
 }
 
 #[test]
+fn lq_as_a_values_marker_is_refused_pointing_to_loq() {
+    let output = run(&[
+        "--unpivot",
+        "--headers-column",
+        "Sample Tag",
+        "--values-markers",
+        "<LQ",
+    ]);
+
+    assert_usage_error(
+        &output,
+        "\"<LQ\" cannot be a values marker: <LQ maps to <LOQ. Use <LOQ, and change <LQ to <LOQ in the source file, for consistency.",
+    );
+}
+
+#[test]
 fn marker_limits_without_unpivot_is_refused() {
     let output = run(&["--marker-limits", "<LOQ=Limit of quantification"]);
 

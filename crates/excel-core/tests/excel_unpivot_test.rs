@@ -592,3 +592,37 @@ fn nd_in_a_sample_cell_is_a_validation_error_pointing_to_ns() {
     }
     assert!(!err.contains("'NS'"), "{err}");
 }
+
+/// <LQ is written <LOQ everywhere, like ND and NS.
+#[test]
+fn lq_among_the_given_markers_is_refused_pointing_to_loq() {
+    let unpivot = Unpivot {
+        values_markers: vec!["<LOQ".to_string(), "<LQ".to_string()],
+        ..spec()
+    };
+    let rows = marker_sheet([Text("<LOQ"), Text("<LOQ"), Number(0.4)]);
+
+    let err = run_with_schema("unpivot-lq-marker", &rows, unpivot, text_schema()).unwrap_err();
+
+    let expected = "\"<LQ\" cannot be a values marker: <LQ maps to <LOQ. Use <LOQ, and change <LQ to <LOQ in the source file, for consistency.";
+    assert!(err.contains(expected), "{err}");
+}
+
+/// Also when followed by a limit, as `<LOQ` may be.
+#[test]
+fn lq_in_a_sample_cell_is_a_validation_error_pointing_to_loq() {
+    let rows = limits_sheet(
+        Number(0.25),
+        [Text("<LQ"), Text("<lq : 0.25"), Text("<LOQ:0.25")],
+    );
+
+    let err = run_with_schema("unpivot-lq-cell", &rows, spec(), text_schema()).unwrap_err();
+
+    for value in ["<LQ", "<lq : 0.25"] {
+        let expected = format!(
+            "row[2]./Concentration: '{value}' is not allowed: <LQ maps to <LOQ. Change it to <LOQ in the source file, for consistency."
+        );
+        assert!(err.contains(&expected), "{expected}\n{err}");
+    }
+    assert!(!err.contains("'<LOQ:0.25'"), "{err}");
+}
