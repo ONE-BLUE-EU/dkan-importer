@@ -14,6 +14,7 @@ use dkan_importer::{
 use excel_core::reqwest::blocking::Client;
 use excel_core::{
     DEFAULT_MARKER_LIMITS, DEFAULT_VALUES_MARKERS, ExcelValidatorBuilder, MarkerLimit, Unpivot,
+    parse_values_marker,
 };
 use rpassword::prompt_password;
 
@@ -114,17 +115,20 @@ struct Args {
     /// validation error, listed with its row in errors.log.
     ///
     /// Giving markers replaces the default ones; list all you need after one
-    /// flag. If the values column is a number field, the markers are not used:
-    /// the field already refuses all text, including these markers.
+    /// flag. ND is refused, even when given here: it maps to NS, so change it
+    /// to NS in the source file, for consistency. If the values column is a
+    /// number field, the markers are not used: the field already refuses all
+    /// text, including these markers.
     ///
     /// Example:
     ///   dkan-importer ... --unpivot --headers-column "Sample Tag" \
-    ///     --values-markers "<LOD" "<LOQ" "NS" "ND"
+    ///     --values-markers "<LOD" "<LOQ" "NS" "<MDL"
     #[arg(
         long,
         value_name = "MARKER",
         num_args = 1..,
         default_values = DEFAULT_VALUES_MARKERS,
+        value_parser = parse_values_marker,
         requires = "unpivot",
         help_heading = "Unpivot",
         verbatim_doc_comment

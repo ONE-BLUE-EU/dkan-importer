@@ -224,6 +224,30 @@ pub const DEFAULT_MARKER_LIMITS: [&str; 2] =
 /// quantification"), so the markers are kept as written rather than replaced by a number.
 pub const DEFAULT_VALUES_MARKERS: [&str; 3] = ["<LOD", "<LOQ", "NS"];
 
+/// Markers some sheets use for a meaning that already has a marker, and the marker to write
+/// instead, so that one meaning is written one way across datasets. They are refused, even
+/// when given on purpose, both as values markers and in sample cells. Matched ignoring case.
+const REPLACED_MARKERS: [(&str, &str); 1] = [("ND", "NS")];
+
+/// The marker that replaces `value`, when it is one of [`REPLACED_MARKERS`]
+fn replaced_marker(value: &str) -> Option<(&'static str, &'static str)> {
+    REPLACED_MARKERS
+        .into_iter()
+        .find(|(old, _)| old.eq_ignore_ascii_case(value.trim()))
+}
+
+/// A values marker as given, trimmed. Refuses a marker that another one replaces, such as `ND`
+/// (see [`REPLACED_MARKERS`]).
+pub fn parse_values_marker(marker: &str) -> std::result::Result<String, String> {
+    let marker = marker.trim();
+    match replaced_marker(marker) {
+        Some((old, new)) => Err(format!(
+            "\"{marker}\" cannot be a values marker: {old} maps to {new}. Use {new}, and change {old} to {new} in the source file, for consistency."
+        )),
+        None => Ok(marker.to_string()),
+    }
+}
+
 /// The sample columns of an unpivoted sheet and the fields they go to
 struct SampleColumns {
     /// (column index, header) of each sample column
@@ -1224,15 +1248,19 @@ impl ExcelValidator {
             .field_schemas
             .get(&values_column)
             .filter(|schema| self.schema_expects_string(&schema.field_type))
-            .map(|_| ValuesMarkers {
-                field: values_column.clone(),
-                markers: unpivot
-                    .values_markers
-                    .iter()
-                    .map(|marker| marker.trim().to_string())
-                    .collect(),
-                limits: Vec::new(),
+            .map(|_| -> Result<ValuesMarkers> {
+                Ok(ValuesMarkers {
+                    field: values_column.clone(),
+                    markers: unpivot
+                        .values_markers
+                        .iter()
+                        .map(|marker| parse_values_marker(marker))
+                        .collect::<std::result::Result<_, _>>()
+                        .map_err(|e| anyhow::anyhow!(e))?,
+                    limits: Vec::new(),
+                })
             })
+            .transpose()?
             .map(|mut values| {
                 // A limit applies only to a marker in use, so the default limits do not stand in
                 // the way of other markers
@@ -2142,6 +2170,9 @@ impl ExcelValidator {
             .and_then(|row| values.marker_with_limit(s, row))
         {
             Some(MarkerWithLimit::Refused(message)) => message,
+            _ if let Some((old, new)) = replaced_marker(s) => format!(
+                "'{s}' is not allowed: {old} maps to {new}. Change it to {new} in the source file, for consistency."
+            ),
             _ => format!(
                 "'{}' is not a number or one of the markers {}",
                 s,

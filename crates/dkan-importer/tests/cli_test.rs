@@ -58,7 +58,7 @@ fn values_column_without_unpivot_is_refused() {
 
 #[test]
 fn values_markers_without_unpivot_is_refused() {
-    let output = run(&["--values-markers", "ND"]);
+    let output = run(&["--values-markers", "<MDL"]);
 
     assert_usage_error(&output, "--unpivot");
 }
@@ -71,7 +71,7 @@ fn unpivot_with_several_values_markers_is_accepted() {
         "--headers-column",
         "Sample Tag",
         "--values-markers",
-        "ND",
+        "<MDL",
         "<LOD",
     ]);
 
@@ -79,6 +79,24 @@ fn unpivot_with_several_values_markers_is_accepted() {
     let expected_exit_code = Some(1);
     assert_eq!(output.status.code(), expected_exit_code, "{stderr}");
     assert!(stderr.contains("/api/importer/upload"), "{stderr}");
+}
+
+/// Refused before anything runs, even when given on purpose.
+#[test]
+fn nd_as_a_values_marker_is_refused_pointing_to_ns() {
+    let output = run(&[
+        "--unpivot",
+        "--headers-column",
+        "Sample Tag",
+        "--values-markers",
+        "NS",
+        "ND",
+    ]);
+
+    assert_usage_error(
+        &output,
+        "\"ND\" cannot be a values marker: ND maps to NS. Use NS, and change ND to NS in the source file, for consistency.",
+    );
 }
 
 #[test]

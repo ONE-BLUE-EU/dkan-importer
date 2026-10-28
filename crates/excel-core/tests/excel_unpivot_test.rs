@@ -367,16 +367,16 @@ fn other_text_in_a_text_values_field_is_a_validation_error_naming_the_markers() 
 #[test]
 fn given_markers_replace_the_default_ones() {
     let unpivot = Unpivot {
-        values_markers: vec!["ND".to_string()],
+        values_markers: vec!["<MDL".to_string()],
         ..spec()
     };
-    let rows = marker_sheet([Text("ND"), Text("<LOD"), Number(0.4)]);
+    let rows = marker_sheet([Text("<MDL"), Text("<LOD"), Number(0.4)]);
 
     let err = run_with_schema("unpivot-own-markers", &rows, unpivot, text_schema()).unwrap_err();
 
-    let expected = "row[2]./Concentration: '<LOD' is not a number or one of the markers ND";
+    let expected = "row[2]./Concentration: '<LOD' is not a number or one of the markers <MDL";
     assert!(err.contains(expected), "{err}");
-    assert!(!err.contains("'ND'"), "{err}");
+    assert!(!err.contains("'<MDL'"), "{err}");
 }
 
 #[test]
@@ -556,4 +556,39 @@ fn a_marker_limit_without_both_sides_is_refused() {
         let result = text.parse::<MarkerLimit>();
         assert!(result.is_err(), "{text}");
     }
+}
+
+/// ND (not detected) is written NS everywhere, so that one meaning has one marker.
+#[test]
+fn nd_among_the_given_markers_is_refused_pointing_to_ns() {
+    for nd in ["ND", " nd "] {
+        let unpivot = Unpivot {
+            values_markers: vec!["NS".to_string(), nd.to_string()],
+            ..spec()
+        };
+        let rows = marker_sheet([Text("NS"), Text("NS"), Number(0.4)]);
+
+        let err = run_with_schema("unpivot-nd-marker", &rows, unpivot, text_schema()).unwrap_err();
+
+        let expected = format!(
+            "\"{}\" cannot be a values marker: ND maps to NS. Use NS, and change ND to NS in the source file, for consistency.",
+            nd.trim()
+        );
+        assert!(err.contains(&expected), "{expected}\n{err}");
+    }
+}
+
+#[test]
+fn nd_in_a_sample_cell_is_a_validation_error_pointing_to_ns() {
+    let rows = marker_sheet([Text("ND"), Text("nd"), Text("NS")]);
+
+    let err = run_with_schema("unpivot-nd-cell", &rows, spec(), text_schema()).unwrap_err();
+
+    for value in ["ND", "nd"] {
+        let expected = format!(
+            "row[2]./Concentration: '{value}' is not allowed: ND maps to NS. Change it to NS in the source file, for consistency."
+        );
+        assert!(err.contains(&expected), "{expected}\n{err}");
+    }
+    assert!(!err.contains("'NS'"), "{err}");
 }
