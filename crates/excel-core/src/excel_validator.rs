@@ -165,9 +165,10 @@ pub struct Unpivot {
     ///
     /// A values field that takes text would otherwise accept anything, so a typo such as `<LDO`
     /// would be uploaded as data. With a text field, every non-blank sample cell must be a
-    /// number or exactly one of these markers (after trimming); anything else is a validation
-    /// error at its source row. A numeric values field ignores the markers: its type already
-    /// refuses all text. See [`DEFAULT_VALUES_MARKERS`].
+    /// number or one of these markers (after trimming, ignoring case); anything else is a
+    /// validation error at its source row. Markers are written uppercase, so `<lod` is uploaded
+    /// as `<LOD`. A numeric values field ignores the markers: its type already refuses all text.
+    /// See [`DEFAULT_VALUES_MARKERS`].
     pub values_markers: Vec<String>,
     /// The markers that may be followed by their limit, and the field holding that limit.
     ///
@@ -183,7 +184,7 @@ pub struct Unpivot {
 
 /// A values marker that may be followed by a limit, and the data dictionary field holding it;
 /// see [`Unpivot::marker_limits`]. Read from `MARKER=FIELD`, as in
-/// `<LOQ=Limit of quantification`.
+/// `<LOQ=Limit of quantification`, with the marker uppercase.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MarkerLimit {
     pub marker: String,
@@ -204,7 +205,7 @@ impl std::str::FromStr for MarkerLimit {
                 )
             })?;
         Ok(MarkerLimit {
-            marker: marker.to_string(),
+            marker: marker.to_uppercase(),
             limit_field: field,
         })
     }
@@ -235,24 +236,29 @@ const REPLACED_MARKERS: [(&str, &str); 3] = [("ND", "NS"), ("<LQ", "<LOQ"), ("NQ
 fn replaced_marker(value: &str) -> Option<(&'static str, &'static str)> {
     let value = value.trim();
     REPLACED_MARKERS.into_iter().find(|(old, _)| {
-        let rest = value
-            .get(..old.len())
-            .filter(|start| start.eq_ignore_ascii_case(old))
-            .and_then(|_| value.get(old.len()..))
-            .map(str::trim_start);
-        rest.is_some_and(|rest| rest.is_empty() || rest.starts_with(':'))
+        strip_marker(value, old)
+            .map(str::trim_start)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with(':'))
     })
 }
 
-/// A values marker as given, trimmed. Refuses a marker that another one replaces, such as `ND`
-/// (see [`REPLACED_MARKERS`]).
+/// What follows `marker` (uppercase) at the start of `value`, matched ignoring case
+fn strip_marker<'a>(value: &'a str, marker: &str) -> Option<&'a str> {
+    value
+        .get(..marker.len())
+        .filter(|start| start.to_uppercase() == marker)?;
+    value.get(marker.len()..)
+}
+
+/// A values marker as given, trimmed and uppercase. Refuses a marker that another one replaces,
+/// such as `ND` (see [`REPLACED_MARKERS`]).
 pub fn parse_values_marker(marker: &str) -> std::result::Result<String, String> {
     let marker = marker.trim();
     match replaced_marker(marker) {
         Some((old, new)) => Err(format!(
             "\"{marker}\" cannot be a values marker: {old} maps to {new}. Use {new}, and change {old} to {new} in the source file, for consistency."
         )),
-        None => Ok(marker.to_string()),
+        None => Ok(marker.to_uppercase()),
     }
 }
 
@@ -270,7 +276,7 @@ struct SampleColumns {
 #[derive(Clone)]
 struct ValuesMarkers {
     field: String,
-    /// Trimmed, as the cells are
+    /// Trimmed and uppercase
     markers: Vec<String>,
     /// The limits of the markers in `markers`, each in a dictionary field
     limits: Vec<MarkerLimit>,
@@ -285,15 +291,23 @@ enum MarkerWithLimit<'a> {
 }
 
 impl ValuesMarkers {
-    /// `None` when `value` is not a marker with a limit followed by `:`.
+    /// The marker `value` is, matched ignoring case
+    fn marker(&self, value: &str) -> Option<&str> {
+        let value = value.trim().to_uppercase();
+        self.markers
+            .iter()
+            .find(|marker| **marker == value)
+            .map(String::as_str)
+    }
+
+    /// `None` when `value` is not a marker with a limit followed by `:`, matched ignoring case.
     fn marker_with_limit(
         &self,
         value: &str,
         row: &Map<String, Value>,
     ) -> Option<MarkerWithLimit<'_>> {
         self.limits.iter().find_map(|limit| {
-            let number = value
-                .strip_prefix(limit.marker.as_str())?
+            let number = strip_marker(value, &limit.marker)?
                 .trim_start()
                 .strip_prefix(':')?
                 .trim();
@@ -982,16 +996,24 @@ impl ExcelValidator {
                 );
                 let mut value =
                     self.convert_cell_to_json_with_schema_awareness(cell, &samples.values_column);
+                // A marker is written uppercase; one followed by the row's limit, as the marker
+                // alone. A limit that does not match is left as written, for the validator to
+                // report.
                 let marker = samples.values_markers.as_ref().and_then(|values| {
-                    match values.marker_with_limit(value.as_str()?, &json_obj)? {
-                        MarkerWithLimit::Matches(marker) => Some(marker),
-                        // Left as written, for the validator to report
-                        MarkerWithLimit::Refused(_) => None,
+                    let s = value.as_str()?;
+                    match values.marker(s) {
+                        Some(marker) => Some((marker, false)),
+                        None => match values.marker_with_limit(s, &json_obj)? {
+                            MarkerWithLimit::Matches(marker) => Some((marker, true)),
+                            MarkerWithLimit::Refused(_) => None,
+                        },
                     }
                 });
-                if let Some(marker) = marker {
+                if let Some((marker, had_limit)) = marker {
                     value = Value::String(marker.to_string());
-                    markers_without_limit = markers_without_limit.saturating_add(1);
+                    if had_limit {
+                        markers_without_limit = markers_without_limit.saturating_add(1);
+                    }
                 }
                 sample_obj.insert(samples.values_column.clone(), value);
                 parsed_rows.push((row_number, sample_obj));
@@ -2156,7 +2178,7 @@ impl ExcelValidator {
     /// See [`Unpivot::values_markers`]. Blank cells are left to the field's own type and required
     /// rules. A number is anything that parses as a finite number, so `NaN` and `inf` are refused;
     /// cells read from Excel as numbers arrive here already written as text. Markers match
-    /// exactly, so `<lod` is not `<LOD`.
+    /// ignoring case, so `<lod` is `<LOD`.
     fn custom_validator_values_markers(
         &self,
         data: &Value,
@@ -2168,7 +2190,7 @@ impl ExcelValidator {
             .as_str()
             .filter(|s| !s.is_empty())?;
         let is_number = s.parse::<f64>().is_ok_and(f64::is_finite);
-        let is_marker = values.markers.iter().any(|marker| marker == s);
+        let is_marker = values.marker(s).is_some();
         if is_number || is_marker {
             return None;
         }

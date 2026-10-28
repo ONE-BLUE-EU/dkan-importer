@@ -92,7 +92,7 @@ Okadaic acid   | ST02_Surface | 0.40
 
 Some results are not numbers: `<LOD` (below the limit of detection), `<LOQ` (below the limit of quantification) or `NS` (no sample). The limits themselves are in their own columns, so these markers are kept as written. That needs a values column that is a text field (`string`) in the data dictionary. A number field refuses them as type mismatches.
 
-A text field would accept any text, so the importer checks every non-blank sample cell: it must be a number or exactly one of the `--values-markers`. Anything else, such as `<LDO`, `<lod` or `n.d.`, is a validation error at its source row:
+A text field would accept any text, so the importer checks every non-blank sample cell: it must be a number or one of the `--values-markers`. Anything else, such as `<LDO` or `n.d.`, is a validation error at its source row:
 
 ```
 Invalid format at row[2]./Concentration: '<LDO' is not a number or one of the markers <LOD, <LOQ, NS
@@ -100,7 +100,7 @@ Invalid format at row[2]./Concentration: '<LDO' is not a number or one of the ma
 
 - The default markers are `<LOD`, `<LOQ` and `NS`. Giving `--values-markers` replaces them, so list all of them: `--values-markers "<LOD" "<LOQ" "NS" "<MDL"`.
 - `ND`, `<LQ` and `NQ` are refused, even when given in `--values-markers`: `ND` maps to `NS`, and `<LQ` and `NQ` map to `<LOQ`, so change them in the source file, for consistency. A sample cell with any of them (any case, also with a limit, as in `<LQ:0.25`) is a validation error saying so: `'ND' is not allowed: ND maps to NS. Change it to NS in the source file, for consistency.`
-- Markers are case-sensitive. Spaces around a cell's text are ignored, so `NS ` is `NS`.
+- Markers match ignoring case and are written uppercase, so `<lod` is uploaded as `<LOD`, also when given in `--values-markers` or `--marker-limits`. Spaces around a cell's text are ignored, so `NS ` is `NS`.
 - Numbers are uploaded as Excel stores them (`0.880999866251062`), and blank cells are uploaded empty.
 - With a number field the markers are not used, because the field already refuses all text.
 - The summary line ends with the rule, for example `... 518 row(s). Concentration takes numbers or <LOD, <LOQ, NS.`

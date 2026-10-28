@@ -352,11 +352,11 @@ fn a_text_values_field_takes_numbers_markers_and_blanks_as_written() {
 
 #[test]
 fn other_text_in_a_text_values_field_is_a_validation_error_naming_the_markers() {
-    let rows = marker_sheet([Text("<LDO"), Text("<lod"), Text("NaN")]);
+    let rows = marker_sheet([Text("<LDO"), Text("n.d."), Text("NaN")]);
 
     let err = run_with_schema("unpivot-bad-marker", &rows, spec(), text_schema()).unwrap_err();
 
-    for value in ["<LDO", "<lod", "NaN"] {
+    for value in ["<LDO", "n.d.", "NaN"] {
         let expected = format!(
             "row[2]./Concentration: '{value}' is not a number or one of the markers <LOD, <LOQ, NS"
         );
@@ -659,4 +659,87 @@ fn nq_in_a_sample_cell_is_a_validation_error_pointing_to_loq() {
         assert!(err.contains(&expected), "{expected}\n{err}");
     }
     assert!(!err.contains("'<LOQ:0.25'"), "{err}");
+}
+
+/// Markers match ignoring case, and are written uppercase, so one marker reads one way.
+#[test]
+fn markers_match_ignoring_case_and_are_written_uppercase() {
+    let unpivot = Unpivot {
+        values_markers: vec!["<LOD".to_string(), "NS".to_string(), "X".to_string()],
+        ..spec()
+    };
+    let mut rows = marker_sheet([Text("x"), Text("ns"), Text("<lod")]);
+    rows.push(vec![
+        Text("Azaspiracid-2"),
+        Text("ng/L"),
+        Text("X"),
+        Text(" nS "),
+        Text("<LoD"),
+    ]);
+
+    let unpivoted = run_with_schema("unpivot-marker-case", &rows, unpivot, text_schema()).unwrap();
+
+    let expected = vec![
+        "Substance,Units,Sample Tag,Concentration",
+        "Okadaic acid,ng/L,ST01,X",
+        "Okadaic acid,ng/L,ST02,NS",
+        "Okadaic acid,ng/L,ST03,<LOD",
+        "Azaspiracid-2,ng/L,ST01,X",
+        "Azaspiracid-2,ng/L,ST02,NS",
+        "Azaspiracid-2,ng/L,ST03,<LOD",
+    ];
+    assert_eq!(unpivoted.csv_lines, expected);
+}
+
+/// A marker given in lowercase is the uppercase marker: listed and written uppercase.
+#[test]
+fn a_marker_given_in_lowercase_is_taken_uppercase() {
+    let unpivot = Unpivot {
+        values_markers: vec!["<mdl".to_string()],
+        ..spec()
+    };
+    let rows = marker_sheet([Text("<mdl"), Text("<MDL"), Text("<LDO")]);
+
+    let err =
+        run_with_schema("unpivot-lowercase-marker", &rows, unpivot, text_schema()).unwrap_err();
+
+    let expected = "row[2]./Concentration: '<LDO' is not a number or one of the markers <MDL";
+    assert!(err.contains(expected), "{err}");
+    assert!(!err.contains("'<mdl'"), "{err}");
+    assert!(!err.contains("'<MDL'"), "{err}");
+}
+
+/// Also when followed by the row's limit, and with a limit marker given in lowercase.
+#[test]
+fn a_marker_with_the_rows_limit_matches_ignoring_case() {
+    let unpivot = Unpivot {
+        values_markers: vec!["<loq".to_string()],
+        marker_limits: vec!["<loq=Limit of quantification".parse().unwrap()],
+        ..spec()
+    };
+    let rows = limits_sheet(
+        Number(0.25),
+        [Text("<loq:0.25"), Text("<Loq : 0.25"), Text("<LOQ")],
+    );
+
+    let unpivoted = run_with_schema("unpivot-limit-case", &rows, unpivot, text_schema()).unwrap();
+
+    let expected = vec![
+        "Substance,Limit of detection,Limit of quantification,Sample Tag,Concentration",
+        "Okadaic acid,0.1,0.25,ST01,<LOQ",
+        "Okadaic acid,0.1,0.25,ST02,<LOQ",
+        "Okadaic acid,0.1,0.25,ST03,<LOQ",
+    ];
+    assert_eq!(unpivoted.csv_lines, expected);
+}
+
+#[test]
+fn a_marker_limit_given_in_lowercase_parses_uppercase() {
+    let limit: MarkerLimit = "<loq=Limit of quantification".parse().unwrap();
+
+    let expected = MarkerLimit {
+        marker: "<LOQ".to_string(),
+        limit_field: "Limit of quantification".to_string(),
+    };
+    assert_eq!(limit, expected);
 }

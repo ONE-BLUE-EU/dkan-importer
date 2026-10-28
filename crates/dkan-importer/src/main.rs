@@ -110,9 +110,10 @@ struct Args {
     /// sample was taken (NS). Keeping these as written needs a values column
     /// that takes text, but a text field accepts anything, so a typo such as
     /// "<LDO" or "n.d." would be uploaded as data. With this option, each
-    /// non-blank sample cell must be a number or exactly one of these markers
-    /// (case-sensitive, surrounding spaces ignored). Anything else is a
-    /// validation error, listed with its row in errors.log.
+    /// non-blank sample cell must be a number or one of these markers (ignoring
+    /// case and surrounding spaces; markers are written uppercase, so <lod is
+    /// uploaded as <LOD). Anything else is a validation error, listed with its
+    /// row in errors.log.
     ///
     /// Giving markers replaces the default ones; list all you need after one
     /// flag. ND, <LQ and NQ are refused, even when given here: ND maps to NS,
