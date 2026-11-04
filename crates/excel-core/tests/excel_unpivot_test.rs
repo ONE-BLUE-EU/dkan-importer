@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::Cell::{self, Empty, Error, Number, Text};
+use common::Cell::{self, Empty, Error, FormulaText, Number, Text};
 use common::{create_simple_mapping, write_test_workbook};
 use excel_core::serde_json::json;
 use excel_core::{
@@ -134,14 +134,12 @@ fn wide_sheet() -> Vec<Vec<Cell>> {
 fn each_sample_cell_becomes_a_row_with_the_column_header_and_the_cell_value() {
     let unpivoted = run("unpivot-rows", &wide_sheet(), spec()).unwrap();
 
-    // The blank source row produces no rows; the empty cell is an empty number, exported with the
-    // usual numeric placeholder
+    // The blank source row and the blank sample cell produce no rows: a blank cell is no result
     let expected = vec![
         "Substance,Units,Sample Tag,Concentration",
         "Okadaic acid,ng/L,ST01,0.88",
         "Okadaic acid,ng/L,ST02,0.4",
         "Azaspiracid-2,ng/L,ST01,1.25",
-        "Azaspiracid-2,ng/L,ST02,000000000000.000000",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
 }
@@ -150,7 +148,40 @@ fn each_sample_cell_becomes_a_row_with_the_column_header_and_the_cell_value() {
 fn the_summary_names_the_kept_and_the_unpivoted_columns_and_the_row_count() {
     let unpivoted = run("unpivot-summary", &wide_sheet(), spec()).unwrap();
 
-    let expected = "Keeping 2 column(s) A-B (Substance … Units); unpivoting 2 column(s) C-D (ST01 … ST02) into Sample Tag / Concentration: 4 row(s).";
+    let expected = "Keeping 2 column(s) A-B (Substance … Units); unpivoting 2 column(s) C-D (ST01 … ST02) into Sample Tag / Concentration: 3 row(s); 1 blank sample cell(s) skipped.";
+    assert_eq!(unpivoted.summary, expected);
+}
+
+#[test]
+fn blank_sample_cells_in_every_form_produce_no_row() {
+    // Empty, only spaces, and a formula giving "" (as `IF(A1="","",A1*1000)` does)
+    let mut rows = marker_sheet([Empty, Text("  "), FormulaText("")]);
+    rows.push(vec![
+        Text("Azaspiracid-2"),
+        Text("ng/L"),
+        Number(1.25),
+        Text("  "),
+        FormulaText(""),
+    ]);
+
+    let unpivoted = run_with_schema("unpivot-blanks", &rows, spec(), text_schema()).unwrap();
+
+    let expected = vec![
+        "Substance,Units,Sample Tag,Concentration",
+        "Azaspiracid-2,ng/L,ST01,1.25",
+    ];
+    assert_eq!(unpivoted.csv_lines, expected);
+    let expected = "Keeping 2 column(s) A-B (Substance … Units); unpivoting 3 column(s) C-E (ST01 … ST03) into Sample Tag / Concentration: 1 row(s); 5 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ, NS.";
+    assert_eq!(unpivoted.summary, expected);
+}
+
+#[test]
+fn without_blank_sample_cells_the_summary_does_not_mention_them() {
+    let rows = marker_sheet([Number(0.88), Number(0.4), Number(1.25)]);
+
+    let unpivoted = run("unpivot-no-blanks", &rows, spec()).unwrap();
+
+    let expected = "Keeping 2 column(s) A-B (Substance … Units); unpivoting 3 column(s) C-E (ST01 … ST03) into Sample Tag / Concentration: 3 row(s).";
     assert_eq!(unpivoted.summary, expected);
 }
 
@@ -326,7 +357,7 @@ fn marker_sheet(cells: [Cell; 3]) -> Vec<Vec<Cell>> {
 }
 
 #[test]
-fn a_text_values_field_takes_numbers_markers_and_blanks_as_written() {
+fn a_text_values_field_takes_numbers_and_markers_as_written() {
     let mut rows = marker_sheet([Number(0.880999866251062), Text("NS "), Text("<LOD")]);
     rows.push(vec![
         Text("Azaspiracid-2"),
@@ -344,7 +375,6 @@ fn a_text_values_field_takes_numbers_markers_and_blanks_as_written() {
         "Okadaic acid,ng/L,ST02,NS",
         "Okadaic acid,ng/L,ST03,<LOD",
         "Azaspiracid-2,ng/L,ST01,<LOQ",
-        "Azaspiracid-2,ng/L,ST02,",
         "Azaspiracid-2,ng/L,ST03,0.5",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
@@ -389,7 +419,7 @@ fn the_summary_of_a_text_values_field_names_the_markers() {
     )
     .unwrap();
 
-    let expected = "Keeping 2 column(s) A-B (Substance … Units); unpivoting 2 column(s) C-D (ST01 … ST02) into Sample Tag / Concentration: 4 row(s). Concentration takes numbers or <LOD, <LOQ, NS.";
+    let expected = "Keeping 2 column(s) A-B (Substance … Units); unpivoting 2 column(s) C-D (ST01 … ST02) into Sample Tag / Concentration: 3 row(s); 1 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ, NS.";
     assert_eq!(unpivoted.summary, expected);
 }
 

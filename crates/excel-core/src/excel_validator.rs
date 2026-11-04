@@ -151,7 +151,8 @@ pub struct ExcelValidatorBuilder {
     extra_columns_to: Option<String>,
 }
 
-/// Unpivot a wide sheet: each cell of a sample column becomes its own row.
+/// Unpivot a wide sheet: each non-blank cell of a sample column becomes its own row. A blank
+/// cell (empty, only spaces, or a formula giving `""`) is no result, so it gives no row.
 ///
 /// The sheet's leading columns whose headers are schema fields are kept and copied to every row;
 /// every column after them is a sample column. Both fields must be schema fields that are not
@@ -844,6 +845,8 @@ impl ExcelValidator {
         let mut rows_with_extra_data: usize = 0;
         // Sample cells such as `<LOQ:0.25` written as the marker alone
         let mut markers_without_limit: usize = 0;
+        // Blank sample cells: no result, so no row
+        let mut blank_sample_cells: usize = 0;
         let mut parsed_rows: Vec<ParsedExcelRow> = Vec::new();
         // Excel error values (#N/A, #DIV/0!, ...) are broken cells, not data: collect them all
         let mut error_cells: Vec<String> = Vec::new();
@@ -982,7 +985,8 @@ impl ExcelValidator {
                 continue;
             };
             for (col_idx, header) in &samples.columns {
-                let Some(cell) = row.get(*col_idx) else {
+                let Some(cell) = row.get(*col_idx).filter(|cell| !is_blank(cell)) else {
+                    blank_sample_cells = blank_sample_cells.saturating_add(1);
                     continue;
                 };
                 if let Data::Error(e) = cell {
@@ -1079,8 +1083,13 @@ impl ExcelValidator {
                     )
                 })
                 .unwrap_or_default();
+            let blanks = if blank_sample_cells > 0 {
+                format!("; {blank_sample_cells} blank sample cell(s) skipped")
+            } else {
+                String::new()
+            };
             format!(
-                "Keeping {} column(s) {}; unpivoting {} column(s) {} into {} / {}: {} row(s).{}",
+                "Keeping {} column(s) {}; unpivoting {} column(s) {} into {} / {}: {} row(s){}.{}",
                 kept_columns.len(),
                 column_span(&kept_columns, first_col),
                 sample_columns.len(),
@@ -1088,6 +1097,7 @@ impl ExcelValidator {
                 samples.headers_column,
                 samples.values_column,
                 parsed_rows.len(),
+                blanks,
                 markers
             )
         });

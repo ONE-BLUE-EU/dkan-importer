@@ -83,9 +83,10 @@ Okadaic acid   | ST02_Surface | 0.40
 ```
 
 - The leading columns whose headers are data dictionary fields are copied to every row. Every column after them is a sample column.
+- A blank sample cell is no result, so it gives no row. Cells with only spaces, and formulas that give `""`, count as blank.
 - `--headers-column` and `--values-column` are only accepted with `--unpivot`, and `--unpivot` needs `--headers-column`. Both must be data dictionary fields that are not columns in the sheet. Otherwise the run stops and lists the fields that can be used.
 - The run also stops, before anything is written or uploaded, if the sheet does not start with data dictionary fields, has no sample columns, or has a data dictionary field among the sample columns.
-- Before validating, it prints what it will do, for example: `Keeping 9 column(s) A-I (Anal. Method Serial No. … Limit of quantification); unpivoting 74 column(s) J-CE (ST01_Surface … ST41_Bottom) into Sample Tag / Concentration: 518 row(s).`
+- Before validating, it prints what it will do, for example: `Keeping 9 column(s) A-I (Anal. Method Serial No. … Limit of quantification); unpivoting 74 column(s) J-CE (ST01_Surface … ST41_Bottom) into Sample Tag / Concentration: 518 row(s); 4 blank sample cell(s) skipped.` The blank cells are only mentioned when there are some.
 - Validation errors name the source row. The row data in `errors.log` includes the sample column's header.
 
 #### Markers instead of numbers
@@ -101,7 +102,7 @@ Invalid format at row[2]./Concentration: '<LDO' is not a number or one of the ma
 - The default markers are `<LOD`, `<LOQ` and `NS`. Giving `--values-markers` replaces them, so list all of them: `--values-markers "<LOD" "<LOQ" "NS" "<MDL"`.
 - `ND`, `<LQ` and `NQ` are refused, even when given in `--values-markers`: `ND` maps to `NS`, and `<LQ` and `NQ` map to `<LOQ`, so change them in the source file, for consistency. A sample cell with any of them (any case, also with a limit, as in `<LQ:0.25`) is a validation error saying so: `'ND' is not allowed: ND maps to NS. Change it to NS in the source file, for consistency.`
 - Markers match ignoring case and are written uppercase, so `<lod` is uploaded as `<LOD`, also when given in `--values-markers` or `--marker-limits`. Spaces around a cell's text are ignored, so `NS ` is `NS`.
-- Numbers are uploaded as Excel stores them (`0.880999866251062`), and blank cells are uploaded empty.
+- Numbers are uploaded as Excel stores them (`0.880999866251062`).
 - With a number field the markers are not used, because the field already refuses all text.
 - The summary line ends with the rule, for example `... 518 row(s). Concentration takes numbers or <LOD, <LOQ, NS.`
 
