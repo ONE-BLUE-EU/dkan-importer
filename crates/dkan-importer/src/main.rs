@@ -55,9 +55,13 @@ struct Args {
     ///
     /// How the sheet is split: the leading columns whose headers are data
     /// dictionary fields are copied to every row. Every column after them is a
-    /// sample column. Each sample cell becomes a row: the column's header goes
-    /// to --headers-column and the cell to --values-column. Both must be data
-    /// dictionary fields that are not columns in the sheet.
+    /// sample column. Each non-blank sample cell becomes a row: the column's
+    /// header goes to --headers-column and the cell to --values-column. Both
+    /// must be data dictionary fields that are not columns in the sheet.
+    ///
+    /// The sheet holds analytical results: it must have an "Identification
+    /// Level" column before the sample columns, holding 2A in every row with
+    /// results. Any other value stops the run, listing the rows to correct.
     ///
     /// Example:
     ///   dkan-importer ... --sheet-name "Analytical results" \

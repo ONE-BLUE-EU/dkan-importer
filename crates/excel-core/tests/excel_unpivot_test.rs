@@ -7,7 +7,8 @@ use common::Cell::{self, Empty, Error, FormulaText, Number, Text};
 use common::{create_simple_mapping, write_test_workbook};
 use excel_core::serde_json::json;
 use excel_core::{
-    DEFAULT_MARKER_LIMITS, DEFAULT_VALUES_MARKERS, ExcelValidatorBuilder, MarkerLimit, Unpivot,
+    DEFAULT_MARKER_LIMITS, DEFAULT_VALUES_MARKERS, ExcelValidatorBuilder, IDENTIFICATION_LEVEL,
+    IDENTIFICATION_LEVEL_FIELD, MarkerLimit, Unpivot,
 };
 
 /// Dictionary fields: two descriptors, the two unpivot targets, two limits, and one more that is in neither the
@@ -29,6 +30,7 @@ fn schema_with_concentration(
         "properties": {
             "Substance": { "type": "string" },
             "Units": { "type": ["string", "null"] },
+            "Identification Level": { "type": ["string", "null"] },
             "Sample Tag": { "type": ["string", "null"] },
             "Concentration": concentration,
             "Limit of detection": { "type": ["number", "null"] },
@@ -118,15 +120,28 @@ fn run_with_schema(
 
 fn wide_sheet() -> Vec<Vec<Cell>> {
     vec![
-        vec![Text("Substance"), Text("Units"), Text("ST01"), Text("ST02")],
+        vec![
+            Text("Substance"),
+            Text("Identification Level"),
+            Text("Units"),
+            Text("ST01"),
+            Text("ST02"),
+        ],
         vec![
             Text("Okadaic acid"),
+            Text("2A"),
             Text("ng/L"),
             Number(0.88),
             Number(0.4),
         ],
         vec![],
-        vec![Text("Azaspiracid-2"), Text("ng/L"), Number(1.25), Empty],
+        vec![
+            Text("Azaspiracid-2"),
+            Text("2A"),
+            Text("ng/L"),
+            Number(1.25),
+            Empty,
+        ],
     ]
 }
 
@@ -136,10 +151,10 @@ fn each_sample_cell_becomes_a_row_with_the_column_header_and_the_cell_value() {
 
     // The blank source row and the blank sample cell produce no rows: a blank cell is no result
     let expected = vec![
-        "Substance,Units,Sample Tag,Concentration",
-        "Okadaic acid,ng/L,ST01,0.88",
-        "Okadaic acid,ng/L,ST02,0.4",
-        "Azaspiracid-2,ng/L,ST01,1.25",
+        "Substance,Identification Level,Units,Sample Tag,Concentration",
+        "Okadaic acid,2A,ng/L,ST01,0.88",
+        "Okadaic acid,2A,ng/L,ST02,0.4",
+        "Azaspiracid-2,2A,ng/L,ST01,1.25",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
 }
@@ -148,7 +163,7 @@ fn each_sample_cell_becomes_a_row_with_the_column_header_and_the_cell_value() {
 fn the_summary_names_the_kept_and_the_unpivoted_columns_and_the_row_count() {
     let unpivoted = run("unpivot-summary", &wide_sheet(), spec()).unwrap();
 
-    let expected = "Keeping 2 column(s) A-B (Substance … Units); unpivoting 2 column(s) C-D (ST01 … ST02) into Sample Tag / Concentration: 3 row(s); 1 blank sample cell(s) skipped.";
+    let expected = "Keeping 3 column(s) A-C (Substance … Units); unpivoting 2 column(s) D-E (ST01 … ST02) into Sample Tag / Concentration: 3 row(s); 1 blank sample cell(s) skipped.";
     assert_eq!(unpivoted.summary, expected);
 }
 
@@ -158,6 +173,7 @@ fn blank_sample_cells_in_every_form_produce_no_row() {
     let mut rows = marker_sheet([Empty, Text("  "), FormulaText("")]);
     rows.push(vec![
         Text("Azaspiracid-2"),
+        Text("2A"),
         Text("ng/L"),
         Number(1.25),
         Text("  "),
@@ -167,11 +183,11 @@ fn blank_sample_cells_in_every_form_produce_no_row() {
     let unpivoted = run_with_schema("unpivot-blanks", &rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
-        "Substance,Units,Sample Tag,Concentration",
-        "Azaspiracid-2,ng/L,ST01,1.25",
+        "Substance,Identification Level,Units,Sample Tag,Concentration",
+        "Azaspiracid-2,2A,ng/L,ST01,1.25",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
-    let expected = "Keeping 2 column(s) A-B (Substance … Units); unpivoting 3 column(s) C-E (ST01 … ST03) into Sample Tag / Concentration: 1 row(s); 5 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ, NS.";
+    let expected = "Keeping 3 column(s) A-C (Substance … Units); unpivoting 3 column(s) D-F (ST01 … ST03) into Sample Tag / Concentration: 1 row(s); 5 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ, NS.";
     assert_eq!(unpivoted.summary, expected);
 }
 
@@ -181,22 +197,30 @@ fn without_blank_sample_cells_the_summary_does_not_mention_them() {
 
     let unpivoted = run("unpivot-no-blanks", &rows, spec()).unwrap();
 
-    let expected = "Keeping 2 column(s) A-B (Substance … Units); unpivoting 3 column(s) C-E (ST01 … ST03) into Sample Tag / Concentration: 3 row(s).";
+    let expected = "Keeping 3 column(s) A-C (Substance … Units); unpivoting 3 column(s) D-F (ST01 … ST03) into Sample Tag / Concentration: 3 row(s).";
     assert_eq!(unpivoted.summary, expected);
 }
 
 #[test]
 fn text_in_the_values_column_is_a_validation_error_at_its_source_row() {
     let rows = vec![
-        vec![Text("Substance"), Text("Units"), Text("ST01"), Text("ST02")],
+        vec![
+            Text("Substance"),
+            Text("Identification Level"),
+            Text("Units"),
+            Text("ST01"),
+            Text("ST02"),
+        ],
         vec![
             Text("Okadaic acid"),
+            Text("2A"),
             Text("ng/L"),
             Number(0.88),
             Number(0.4),
         ],
         vec![
             Text("Azaspiracid-2"),
+            Text("2A"),
             Text("ng/L"),
             Number(1.25),
             Text("<LOD"),
@@ -273,8 +297,12 @@ fn a_sheet_that_starts_with_a_sample_column_is_refused() {
 #[test]
 fn a_sheet_without_sample_columns_is_refused() {
     let rows = vec![
-        vec![Text("Substance"), Text("Units")],
-        vec![Text("Okadaic acid"), Text("ng/L")],
+        vec![
+            Text("Substance"),
+            Text("Identification Level"),
+            Text("Units"),
+        ],
+        vec![Text("Okadaic acid"), Text("2A"), Text("ng/L")],
     ];
 
     let err =
@@ -287,9 +315,16 @@ fn a_sheet_without_sample_columns_is_refused() {
 #[test]
 fn a_dictionary_field_among_the_sample_columns_is_refused() {
     let rows = vec![
-        vec![Text("Substance"), Text("ST01"), Text("Units"), Text("ST02")],
+        vec![
+            Text("Substance"),
+            Text("Identification Level"),
+            Text("ST01"),
+            Text("Units"),
+            Text("ST02"),
+        ],
         vec![
             Text("Okadaic acid"),
+            Text("2A"),
             Number(0.88),
             Text("ng/L"),
             Number(0.4),
@@ -300,22 +335,27 @@ fn a_dictionary_field_among_the_sample_columns_is_refused() {
         .expect_err("a misplaced dictionary field must be refused");
 
     let expected =
-        "column C \"Units\" is a data dictionary field after the first sample column B \"ST01\"";
+        "column D \"Units\" is a data dictionary field after the first sample column C \"ST01\"";
     assert!(err.contains(expected), "{err}");
 }
 
 #[test]
 fn a_sample_column_without_a_header_is_refused() {
     let rows = vec![
-        vec![Text("Substance"), Text("ST01"), Empty],
-        vec![Text("Okadaic acid"), Number(0.88), Number(0.4)],
+        vec![
+            Text("Substance"),
+            Text("Identification Level"),
+            Text("ST01"),
+            Empty,
+        ],
+        vec![Text("Okadaic acid"), Text("2A"), Number(0.88), Number(0.4)],
     ];
 
     let err = run("unpivot-unnamed-sample", &rows, spec())
         .expect_err("a sample column without a header must be refused");
 
     assert!(
-        err.contains("column C (first value at row 2: \"0.4\")"),
+        err.contains("column D (first value at row 2: \"0.4\")"),
         "{err}"
     );
 }
@@ -324,9 +364,16 @@ fn a_sample_column_without_a_header_is_refused() {
 #[test]
 fn excel_error_cells_are_reported_once_each() {
     let rows = vec![
-        vec![Text("Substance"), Text("Units"), Text("ST01"), Text("ST02")],
+        vec![
+            Text("Substance"),
+            Text("Identification Level"),
+            Text("Units"),
+            Text("ST01"),
+            Text("ST02"),
+        ],
         vec![
             Text("Okadaic acid"),
+            Text("2A"),
             Error("#N/A"),
             Number(0.88),
             Error("#DIV/0!"),
@@ -347,12 +394,20 @@ fn marker_sheet(cells: [Cell; 3]) -> Vec<Vec<Cell>> {
     vec![
         vec![
             Text("Substance"),
+            Text("Identification Level"),
             Text("Units"),
             Text("ST01"),
             Text("ST02"),
             Text("ST03"),
         ],
-        vec![Text("Okadaic acid"), Text("ng/L"), st01, st02, st03],
+        vec![
+            Text("Okadaic acid"),
+            Text("2A"),
+            Text("ng/L"),
+            st01,
+            st02,
+            st03,
+        ],
     ]
 }
 
@@ -361,6 +416,7 @@ fn a_text_values_field_takes_numbers_and_markers_as_written() {
     let mut rows = marker_sheet([Number(0.880999866251062), Text("NS "), Text("<LOD")]);
     rows.push(vec![
         Text("Azaspiracid-2"),
+        Text("2A"),
         Text("ng/L"),
         Text("<LOQ"),
         Empty,
@@ -370,12 +426,12 @@ fn a_text_values_field_takes_numbers_and_markers_as_written() {
     let unpivoted = run_with_schema("unpivot-markers", &rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
-        "Substance,Units,Sample Tag,Concentration",
-        "Okadaic acid,ng/L,ST01,0.880999866251062",
-        "Okadaic acid,ng/L,ST02,NS",
-        "Okadaic acid,ng/L,ST03,<LOD",
-        "Azaspiracid-2,ng/L,ST01,<LOQ",
-        "Azaspiracid-2,ng/L,ST03,0.5",
+        "Substance,Identification Level,Units,Sample Tag,Concentration",
+        "Okadaic acid,2A,ng/L,ST01,0.880999866251062",
+        "Okadaic acid,2A,ng/L,ST02,NS",
+        "Okadaic acid,2A,ng/L,ST03,<LOD",
+        "Azaspiracid-2,2A,ng/L,ST01,<LOQ",
+        "Azaspiracid-2,2A,ng/L,ST03,0.5",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
 }
@@ -419,7 +475,7 @@ fn the_summary_of_a_text_values_field_names_the_markers() {
     )
     .unwrap();
 
-    let expected = "Keeping 2 column(s) A-B (Substance … Units); unpivoting 2 column(s) C-D (ST01 … ST02) into Sample Tag / Concentration: 3 row(s); 1 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ, NS.";
+    let expected = "Keeping 3 column(s) A-C (Substance … Units); unpivoting 2 column(s) D-E (ST01 … ST02) into Sample Tag / Concentration: 3 row(s); 1 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ, NS.";
     assert_eq!(unpivoted.summary, expected);
 }
 
@@ -429,13 +485,22 @@ fn limits_sheet(loq: Cell, cells: [Cell; 3]) -> Vec<Vec<Cell>> {
     vec![
         vec![
             Text("Substance"),
+            Text("Identification Level"),
             Text("Limit of detection"),
             Text("Limit of quantification"),
             Text("ST01"),
             Text("ST02"),
             Text("ST03"),
         ],
-        vec![Text("Okadaic acid"), Number(0.1), loq, st01, st02, st03],
+        vec![
+            Text("Okadaic acid"),
+            Text("2A"),
+            Number(0.1),
+            loq,
+            st01,
+            st02,
+            st03,
+        ],
     ]
 }
 
@@ -449,10 +514,10 @@ fn a_marker_followed_by_the_rows_limit_is_written_as_the_marker() {
     let unpivoted = run_with_schema("unpivot-limit-match", &rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
-        "Substance,Limit of detection,Limit of quantification,Sample Tag,Concentration",
-        "Okadaic acid,0.1,0.25,ST01,<LOQ",
-        "Okadaic acid,0.1,0.25,ST02,<LOD",
-        "Okadaic acid,0.1,0.25,ST03,0.3",
+        "Substance,Identification Level,Limit of detection,Limit of quantification,Sample Tag,Concentration",
+        "Okadaic acid,2A,0.1,0.25,ST01,<LOQ",
+        "Okadaic acid,2A,0.1,0.25,ST02,<LOD",
+        "Okadaic acid,2A,0.1,0.25,ST03,0.3",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
     let expected_summary = "Concentration takes numbers or <LOD, <LOQ, NS. 2 value(s) written as their marker alone, the number after it being the row's limit: <LOD (Limit of detection), <LOQ (Limit of quantification).";
@@ -564,7 +629,7 @@ fn a_number_values_field_ignores_the_limits() {
     )
     .unwrap();
 
-    let expected = "Okadaic acid,0.1,0.25,ST03,0.3";
+    let expected = "Okadaic acid,2A,0.1,0.25,ST03,0.3";
     assert!(
         unpivoted.csv_lines.iter().any(|l| l == expected),
         "{:?}",
@@ -701,6 +766,7 @@ fn markers_match_ignoring_case_and_are_written_uppercase() {
     let mut rows = marker_sheet([Text("x"), Text("ns"), Text("<lod")]);
     rows.push(vec![
         Text("Azaspiracid-2"),
+        Text("2A"),
         Text("ng/L"),
         Text("X"),
         Text(" nS "),
@@ -710,13 +776,13 @@ fn markers_match_ignoring_case_and_are_written_uppercase() {
     let unpivoted = run_with_schema("unpivot-marker-case", &rows, unpivot, text_schema()).unwrap();
 
     let expected = vec![
-        "Substance,Units,Sample Tag,Concentration",
-        "Okadaic acid,ng/L,ST01,X",
-        "Okadaic acid,ng/L,ST02,NS",
-        "Okadaic acid,ng/L,ST03,<LOD",
-        "Azaspiracid-2,ng/L,ST01,X",
-        "Azaspiracid-2,ng/L,ST02,NS",
-        "Azaspiracid-2,ng/L,ST03,<LOD",
+        "Substance,Identification Level,Units,Sample Tag,Concentration",
+        "Okadaic acid,2A,ng/L,ST01,X",
+        "Okadaic acid,2A,ng/L,ST02,NS",
+        "Okadaic acid,2A,ng/L,ST03,<LOD",
+        "Azaspiracid-2,2A,ng/L,ST01,X",
+        "Azaspiracid-2,2A,ng/L,ST02,NS",
+        "Azaspiracid-2,2A,ng/L,ST03,<LOD",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
 }
@@ -755,10 +821,10 @@ fn a_marker_with_the_rows_limit_matches_ignoring_case() {
     let unpivoted = run_with_schema("unpivot-limit-case", &rows, unpivot, text_schema()).unwrap();
 
     let expected = vec![
-        "Substance,Limit of detection,Limit of quantification,Sample Tag,Concentration",
-        "Okadaic acid,0.1,0.25,ST01,<LOQ",
-        "Okadaic acid,0.1,0.25,ST02,<LOQ",
-        "Okadaic acid,0.1,0.25,ST03,<LOQ",
+        "Substance,Identification Level,Limit of detection,Limit of quantification,Sample Tag,Concentration",
+        "Okadaic acid,2A,0.1,0.25,ST01,<LOQ",
+        "Okadaic acid,2A,0.1,0.25,ST02,<LOQ",
+        "Okadaic acid,2A,0.1,0.25,ST03,<LOQ",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
 }
@@ -772,4 +838,88 @@ fn a_marker_limit_given_in_lowercase_parses_uppercase() {
         limit_field: "Limit of quantification".to_string(),
     };
     assert_eq!(limit, expected);
+}
+
+/// A sheet whose rows have `levels` as their identification level, each with one result.
+fn levels_sheet(levels: Vec<Cell>) -> Vec<Vec<Cell>> {
+    let mut rows = vec![vec![
+        Text("Substance"),
+        Text(IDENTIFICATION_LEVEL_FIELD),
+        Text("ST01"),
+    ]];
+    rows.extend(
+        levels
+            .into_iter()
+            .map(|level| vec![Text("Okadaic acid"), level, Number(0.88)]),
+    );
+    rows
+}
+
+#[test]
+fn a_dictionary_without_the_identification_level_field_is_refused() {
+    let mut schema = schema();
+    schema["properties"]
+        .as_object_mut()
+        .unwrap()
+        .remove(IDENTIFICATION_LEVEL_FIELD)
+        .expect("the test dictionary has the field to remove");
+    let rows = vec![
+        vec![Text("Substance"), Text("ST01")],
+        vec![Text("Okadaic acid"), Number(0.88)],
+    ];
+
+    let err = run_with_schema("unpivot-no-level-field", &rows, spec(), schema).unwrap_err();
+
+    let expected = "the data dictionary has no field \"Identification Level\"";
+    assert!(err.contains(expected), "{err}");
+}
+
+#[test]
+fn a_sheet_without_the_identification_level_column_is_refused() {
+    let rows = vec![
+        vec![Text("Substance"), Text("ST01")],
+        vec![Text("Okadaic acid"), Number(0.88)],
+    ];
+
+    let err = run("unpivot-no-level-column", &rows, spec()).unwrap_err();
+
+    let expected = "it has no \"Identification Level\" column before the sample columns";
+    assert!(err.contains(expected), "{err}");
+}
+
+#[test]
+fn an_identification_level_of_2a_is_kept_as_written() {
+    let rows = levels_sheet(vec![Text(IDENTIFICATION_LEVEL), Text(" 2A ")]);
+
+    let unpivoted = run("unpivot-level-2a", &rows, spec()).unwrap();
+
+    let expected = vec![
+        "Substance,Identification Level,Sample Tag,Concentration",
+        "Okadaic acid,2A,ST01,0.88",
+        "Okadaic acid,2A,ST01,0.88",
+    ];
+    assert_eq!(unpivoted.csv_lines, expected);
+}
+
+#[test]
+fn rows_whose_identification_level_is_not_2a_stop_the_run_listing_each() {
+    let mut rows = levels_sheet(vec![
+        Number(1.0),
+        Empty,
+        Text("2a"),
+        Text(IDENTIFICATION_LEVEL),
+    ]);
+    // A row without results gives no rows, so its identification level does not matter
+    rows.push(vec![Text("Okadaic acid"), Number(2.0), Empty]);
+
+    let err = run("unpivot-level-not-2a", &rows, spec()).unwrap_err();
+
+    let expected = "The sheet \"Sheet1\" has 3 row(s) whose Identification Level is not 2A. \
+Analytical results are always identification level 2A: correct these cells in the source file and try again:
+  row 2: 1
+  row 3: blank
+  row 4: 2a";
+    assert!(err.contains(expected), "{err}");
+    assert!(!err.contains("row 5"), "{err}");
+    assert!(!err.contains("row 6"), "{err}");
 }

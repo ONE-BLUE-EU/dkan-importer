@@ -226,6 +226,14 @@ pub const DEFAULT_MARKER_LIMITS: [&str; 2] =
 /// quantification"), so the markers are kept as written rather than replaced by a number.
 pub const DEFAULT_VALUES_MARKERS: [&str; 3] = ["<LOD", "<LOQ", "NS"];
 
+/// The field holding an analytical result's identification level. An unpivoted sheet must have
+/// it among its kept columns, holding [`IDENTIFICATION_LEVEL`] in every row with a result.
+pub const IDENTIFICATION_LEVEL_FIELD: &str = "Identification Level";
+
+/// The identification level of every analytical result. Other values are not rewritten: they
+/// stop the run, to be corrected in the source file.
+pub const IDENTIFICATION_LEVEL: &str = "2A";
+
 /// Markers some sheets use for a meaning that already has a marker, and the marker to write
 /// instead, so that one meaning is written one way across datasets. They are refused, even
 /// when given on purpose, both as values markers and in sample cells (also when followed by
@@ -271,6 +279,8 @@ struct SampleColumns {
     values_column: String,
     /// `Some` when `values_column` takes text; see [`Unpivot::values_markers`]
     values_markers: Option<ValuesMarkers>,
+    /// Index of the kept column holding [`IDENTIFICATION_LEVEL_FIELD`]
+    identification_level: usize,
 }
 
 /// A values field that takes text, and the markers its cells may hold besides a number
@@ -847,6 +857,8 @@ impl ExcelValidator {
         let mut markers_without_limit: usize = 0;
         // Blank sample cells: no result, so no row
         let mut blank_sample_cells: usize = 0;
+        // Rows with results whose identification level is not IDENTIFICATION_LEVEL
+        let mut wrong_identification_levels: Vec<String> = Vec::new();
         let mut parsed_rows: Vec<ParsedExcelRow> = Vec::new();
         // Excel error values (#N/A, #DIV/0!, ...) are broken cells, not data: collect them all
         let mut error_cells: Vec<String> = Vec::new();
@@ -984,6 +996,23 @@ impl ExcelValidator {
                 parsed_rows.push((row_number, json_obj));
                 continue;
             };
+            // Only a row with results gives rows, so only its identification level matters
+            let has_results = samples
+                .columns
+                .iter()
+                .any(|(col_idx, _)| row.get(*col_idx).is_some_and(|cell| !is_blank(cell)));
+            match row.get(samples.identification_level) {
+                _ if !has_results => {}
+                Some(Data::String(level)) if level.trim() == IDENTIFICATION_LEVEL => {}
+                // Already among the error cells
+                Some(Data::Error(_)) => {}
+                cell => wrong_identification_levels.push(format!(
+                    "row {}: {}",
+                    row_number,
+                    cell.filter(|cell| !is_blank(cell))
+                        .map_or_else(|| "blank".to_string(), ToString::to_string)
+                )),
+            }
             for (col_idx, header) in &samples.columns {
                 let Some(cell) = row.get(*col_idx).filter(|cell| !is_blank(cell)) else {
                     blank_sample_cells = blank_sample_cells.saturating_add(1);
@@ -1042,6 +1071,18 @@ impl ExcelValidator {
                 self.sheet_name,
                 error_cells.len(),
                 error_cells.join("\n  ")
+            ));
+        }
+
+        if !wrong_identification_levels.is_empty() {
+            return Err(anyhow::anyhow!(
+                "The sheet \"{}\" has {} row(s) whose {} is not {}. Analytical results are always identification level {}: correct these cells in the source file and try again:\n  {}",
+                self.sheet_name,
+                wrong_identification_levels.len(),
+                IDENTIFICATION_LEVEL_FIELD,
+                IDENTIFICATION_LEVEL,
+                IDENTIFICATION_LEVEL,
+                wrong_identification_levels.join("\n  ")
             ));
         }
 
@@ -1283,6 +1324,24 @@ impl ExcelValidator {
             ));
         }
 
+        let level_field = normalize_string(IDENTIFICATION_LEVEL_FIELD);
+        if !self.field_schemas.contains_key(&level_field) {
+            return Err(anyhow::anyhow!(
+                "Cannot unpivot the sheet \"{}\": the data dictionary has no field \"{}\", which analytical results need.",
+                self.sheet_name,
+                level_field
+            ));
+        }
+        let Some(&(identification_level, _)) = kept.iter().find(|(_, name)| *name == level_field)
+        else {
+            return Err(anyhow::anyhow!(
+                "Cannot unpivot the sheet \"{}\": it has no \"{}\" column before the sample columns. Analytical results are always identification level {}.",
+                self.sheet_name,
+                level_field,
+                IDENTIFICATION_LEVEL
+            ));
+        };
+
         // A numeric field needs no markers: its type already refuses text
         let values_markers = self
             .field_schemas
@@ -1334,6 +1393,7 @@ impl ExcelValidator {
                 headers_column,
                 values_column,
                 values_markers,
+                identification_level,
             },
         ))
     }
