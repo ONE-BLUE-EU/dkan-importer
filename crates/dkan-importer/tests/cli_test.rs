@@ -313,7 +313,7 @@ fn a_failed_run_leaves_a_run_log_with_the_error_and_without_the_password() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let expected_exit_code = Some(1);
     assert_eq!(output.status.code(), expected_exit_code, "{stderr}");
-    let log_path = dir.join("some-dataset_analytical_results_(i).run.log");
+    let log_path = dir.join("analytical_results_(i)_some-dataset.run.log");
     let log = std::fs::read_to_string(&log_path)
         .unwrap_or_else(|e| panic!("no run log at {}: {e}", log_path.display()));
     assert!(log.contains("Excel file: unused.xlsx\n"), "{log}");
@@ -331,7 +331,7 @@ fn a_failed_run_leaves_a_run_log_with_the_error_and_without_the_password() {
 #[test]
 fn each_run_replaces_the_run_log_of_the_last_one() {
     let dir = new_run_dir("run-log-replaced");
-    let log_path = dir.join("some-dataset_sheet1.run.log");
+    let log_path = dir.join("sheet1_some-dataset.run.log");
     std::fs::write(&log_path, "from an earlier run\n").unwrap();
 
     run_in(&dir, &[]);

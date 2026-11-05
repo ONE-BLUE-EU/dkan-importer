@@ -236,7 +236,7 @@ Example Excel structure:
 - Upload progress and success confirmation
 
 ### Run Log File
-Every run writes `<dataset>_<sheet>.run.log` in the current directory (the sheet name lowercase, with its spaces as `_`, as in `some-dataset_analytical_results_(i).run.log`). Each run replaces the log of the last run of that dataset and sheet, so it always describes the latest one. It is written even when the run stops, and never contains the password. It holds:
+Every run writes `<sheet>_<dataset>.run.log` in the current directory (the sheet name lowercase, with its spaces as `_`, as in `analytical_results_(i)_some-dataset.run.log`), next to the CSV file `<sheet>_<timestamp>_<dataset>.csv`. Each run replaces the log of the last run of that dataset and sheet, so it always describes the latest one. It is written even when the run stops, and never contains the password. It holds:
 - What the run was given: the Excel file, sheet, dataset, data dictionary and DKAN URL
 - Every line the run printed, including the error that stopped it
 - Every change made to a cell instead of taking it as written, one line per cell with its reason, so the data can be checked and corrected at its source:

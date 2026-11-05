@@ -8,13 +8,13 @@ use excel_core::{Change, Question};
 use std::fs::File;
 use std::io::{self, Write};
 
-/// `<dataset>_<sheet>.run.log`, with the sheet name lowercase and its spaces as `_`, as in the
+/// `<sheet>_<dataset>.run.log`, with the sheet name lowercase and its spaces as `_`, as in the
 /// CSV file name
 pub fn run_log_filename(dataset_id: &str, sheet_name: &str) -> String {
     let sheet_name = normalize_string(sheet_name)
         .replace(' ', "_")
         .to_lowercase();
-    format!("{dataset_id}_{sheet_name}.run.log")
+    format!("{sheet_name}_{dataset_id}.run.log")
 }
 
 /// The run log's lines for `changes`: one per cell, as a sheet can have thousands
