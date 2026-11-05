@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use calamine::{Data, Reader, Xlsx, open_workbook};
 use jsonschema::Validator;
 use serde_json::{Map, Value, json};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 
@@ -33,6 +34,8 @@ struct ProcessedSheet {
     unpivot_summary: Option<String>,
     /// What moving the extra columns did, when they were moved
     extra_columns_summary: Option<String>,
+    /// The Excel error cells emptied, when there were any
+    error_cells_summary: Option<String>,
     /// The markers allowed in the values field, when an unpivot sends its cells to a text field
     values_markers: Option<ValuesMarkers>,
 }
@@ -140,6 +143,7 @@ pub struct ExcelValidator {
     rows: Vec<ParsedExcelRow>,
     unpivot_summary: Option<String>,
     extra_columns_summary: Option<String>,
+    error_cells_summary: Option<String>,
     values_markers: Option<ValuesMarkers>,
 }
 
@@ -421,6 +425,7 @@ impl ExcelValidatorBuilder {
             rows: Vec::new(),
             unpivot_summary: None,
             extra_columns_summary: None,
+            error_cells_summary: None,
             values_markers: None,
         };
 
@@ -438,6 +443,7 @@ impl ExcelValidatorBuilder {
             rows: sheet.rows,
             unpivot_summary: sheet.unpivot_summary,
             extra_columns_summary: sheet.extra_columns_summary,
+            error_cells_summary: sheet.error_cells_summary,
             values_markers: sheet.values_markers,
         })
     }
@@ -467,6 +473,7 @@ impl ExcelValidator {
             rows: Vec::new(),
             unpivot_summary: None,
             extra_columns_summary: None,
+            error_cells_summary: None,
             values_markers: None,
         })
     }
@@ -481,6 +488,13 @@ impl ExcelValidator {
     /// moved; see [`ExcelValidatorBuilder::extra_columns_to`]
     pub fn extra_columns_summary(&self) -> Option<&str> {
         self.extra_columns_summary.as_deref()
+    }
+
+    /// The Excel error cells (`#VALUE!`, `#N/A`, ...) read as blank cells, by row and column,
+    /// when there were any. An error value is what a formula gives when its calculation fails, so
+    /// it carries no data.
+    pub fn error_cells_summary(&self) -> Option<&str> {
+        self.error_cells_summary.as_deref()
     }
 
     /// Get the headers from the Excel file
@@ -860,7 +874,8 @@ impl ExcelValidator {
         // Rows with results whose identification level is not IDENTIFICATION_LEVEL
         let mut wrong_identification_levels: Vec<String> = Vec::new();
         let mut parsed_rows: Vec<ParsedExcelRow> = Vec::new();
-        // Excel error values (#N/A, #DIV/0!, ...) are broken cells, not data: collect them all
+        // Excel error values (#VALUE!, #N/A, ...) are failed calculations, not data: each is read
+        // as a blank cell and listed
         let mut error_cells: Vec<String> = Vec::new();
         // Data in a column without a header has no field to go to: the first value of each such
         // column, by column index
@@ -924,6 +939,34 @@ impl ExcelValidator {
                 .saturating_add(row_index)
                 .saturating_add(1);
 
+            let row: Cow<[Data]> = if row.iter().any(|cell| matches!(cell, Data::Error(_))) {
+                Cow::Owned(
+                    row.iter()
+                        .enumerate()
+                        .map(|(col_idx, cell)| match cell {
+                            Data::Error(e) => {
+                                let header = columns
+                                    .get(col_idx)
+                                    .and_then(Option::as_deref)
+                                    .map(|header| format!(" \"{header}\""))
+                                    .unwrap_or_default();
+                                error_cells.push(format!(
+                                    "row {}, column {}{}: {}",
+                                    row_number,
+                                    column_name(sheet_column(first_col, col_idx)),
+                                    header,
+                                    e
+                                ));
+                                Data::Empty
+                            }
+                            cell => cell.clone(),
+                        })
+                        .collect(),
+                )
+            } else {
+                Cow::Borrowed(row)
+            };
+
             for (col_idx, (cell, _)) in row
                 .iter()
                 .zip(&columns)
@@ -941,10 +984,7 @@ impl ExcelValidator {
             }
 
             // Skip empty rows
-            let is_empty_row = row
-                .iter()
-                .all(|cell| is_blank(cell) || matches!(cell, Data::Error(_)));
-            if is_empty_row {
+            if row.iter().all(is_blank) {
                 continue;
             }
 
@@ -955,10 +995,6 @@ impl ExcelValidator {
                 else {
                     continue;
                 };
-                if let Data::Error(e) = cell {
-                    error_cells.push(format!("row {}, column '{}': {}", row_number, header, e));
-                    continue;
-                }
                 let value = self.convert_cell_to_json_with_schema_awareness(cell, header);
                 json_obj.insert(header.clone(), value);
             }
@@ -969,10 +1005,6 @@ impl ExcelValidator {
                     let Some(cell) = row.get(*col_idx).filter(|cell| !is_blank(cell)) else {
                         continue;
                     };
-                    if let Data::Error(e) = cell {
-                        error_cells.push(format!("row {}, column '{}': {}", row_number, header, e));
-                        continue;
-                    }
                     moved.insert(header.clone(), self.extra_cell_to_json(cell, header));
                 }
                 if !moved.is_empty() {
@@ -1004,8 +1036,6 @@ impl ExcelValidator {
             match row.get(samples.identification_level) {
                 _ if !has_results => {}
                 Some(Data::String(level)) if level.trim() == IDENTIFICATION_LEVEL => {}
-                // Already among the error cells
-                Some(Data::Error(_)) => {}
                 cell => wrong_identification_levels.push(format!(
                     "row {}: {}",
                     row_number,
@@ -1018,10 +1048,6 @@ impl ExcelValidator {
                     blank_sample_cells = blank_sample_cells.saturating_add(1);
                     continue;
                 };
-                if let Data::Error(e) = cell {
-                    error_cells.push(format!("row {}, column '{}': {}", row_number, header, e));
-                    continue;
-                }
                 let mut sample_obj = json_obj.clone();
                 sample_obj.insert(
                     samples.headers_column.clone(),
@@ -1062,15 +1088,6 @@ impl ExcelValidator {
                     .into_values()
                     .collect::<Vec<_>>()
                     .join("\n  ")
-            ));
-        }
-
-        if !error_cells.is_empty() {
-            return Err(anyhow::anyhow!(
-                "The sheet \"{}\" contains {} Excel error value(s). Fix these cells and try again:\n  {}",
-                self.sheet_name,
-                error_cells.len(),
-                error_cells.join("\n  ")
             ));
         }
 
@@ -1170,6 +1187,13 @@ impl ExcelValidator {
             rows: parsed_rows,
             unpivot_summary,
             extra_columns_summary,
+            error_cells_summary: (!error_cells.is_empty()).then(|| {
+                format!(
+                    "Emptied {} Excel error value(s), uploading them as blank cells:\n  {}",
+                    error_cells.len(),
+                    error_cells.join("\n  ")
+                )
+            }),
             values_markers,
         })
     }

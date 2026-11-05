@@ -244,6 +244,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         builder = builder.extra_columns_to(field);
     }
     let mut validator = builder.build()?;
+    if let Some(summary) = validator.error_cells_summary() {
+        println!("⚠️  {summary}");
+    }
     if let Some(summary) = validator.unpivot_summary() {
         println!("✅ {summary}");
     }

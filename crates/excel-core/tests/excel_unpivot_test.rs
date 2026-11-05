@@ -57,6 +57,8 @@ fn spec() -> Unpivot {
 #[derive(Debug)]
 struct Unpivoted {
     summary: String,
+    /// What the validator reports about the Excel error cells it emptied
+    error_cells: Option<String>,
     csv_lines: Vec<String>,
 }
 
@@ -84,6 +86,7 @@ fn run_with_schema(
             .unpivot_summary()
             .ok_or("an unpivoted sheet must have a summary")?
             .to_string();
+        let error_cells = validator.error_cells_summary().map(String::from);
         validator.validate_excel().map_err(|e| {
             let details: Vec<String> = validator
                 .validation_reports
@@ -110,7 +113,11 @@ fn run_with_schema(
             .lines()
             .map(String::from)
             .collect();
-        Ok(Unpivoted { summary, csv_lines })
+        Ok(Unpivoted {
+            summary,
+            error_cells,
+            csv_lines,
+        })
     })();
 
     let _ = std::fs::remove_file(&xlsx);
@@ -362,7 +369,7 @@ fn a_sample_column_without_a_header_is_refused() {
 
 /// An error in a kept cell is one broken cell, reported once, not once per sample column.
 #[test]
-fn excel_error_cells_are_reported_once_each() {
+fn excel_error_cells_are_emptied_so_a_sample_error_gives_no_row() {
     let rows = vec![
         vec![
             Text("Substance"),
@@ -380,12 +387,24 @@ fn excel_error_cells_are_reported_once_each() {
         ],
     ];
 
-    let err =
-        run("unpivot-error-cells", &rows, spec()).expect_err("error cells must stop the import");
+    let unpivoted = run("unpivot-error-cells", &rows, spec()).unwrap();
 
-    assert!(err.contains("contains 2 Excel error value(s)"), "{err}");
-    assert!(err.contains("row 2, column 'Units': #N/A"), "{err}");
-    assert!(err.contains("row 2, column 'ST02': #DIV/0!"), "{err}");
+    let expected = vec![
+        "Substance,Identification Level,Units,Sample Tag,Concentration",
+        "Okadaic acid,2A,,ST01,0.88",
+    ];
+    assert_eq!(unpivoted.csv_lines, expected);
+    let expected = "Emptied 2 Excel error value(s), uploading them as blank cells:
+  row 2, column C \"Units\": #N/A
+  row 2, column E \"ST02\": #DIV/0!";
+    assert_eq!(unpivoted.error_cells.as_deref(), Some(expected));
+    assert!(
+        unpivoted
+            .summary
+            .ends_with("1 row(s); 1 blank sample cell(s) skipped."),
+        "{}",
+        unpivoted.summary
+    );
 }
 
 /// Every outcome of a sample cell going to a values field that takes text.

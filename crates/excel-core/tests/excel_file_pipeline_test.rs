@@ -43,6 +43,15 @@ fn run_pipeline(name: &str, rows: Vec<Vec<common::Cell>>) -> Result<Vec<String>,
 /// Validate and export `all_rows` (the first row being the headers); return the CSV lines, or the
 /// error.
 fn run_sheet(name: &str, all_rows: &[Vec<common::Cell>]) -> Result<Vec<String>, String> {
+    run_sheet_with_error_cells(name, all_rows).map(|(_, lines)| lines)
+}
+
+/// [`run_sheet`], also returning what the validator reports about the Excel error cells it
+/// emptied.
+fn run_sheet_with_error_cells(
+    name: &str,
+    all_rows: &[Vec<common::Cell>],
+) -> Result<(Option<String>, Vec<String>), String> {
     let xlsx = write_test_workbook(name, all_rows);
     let csv = xlsx.with_extension("csv");
 
@@ -51,6 +60,7 @@ fn run_sheet(name: &str, all_rows: &[Vec<common::Cell>]) -> Result<Vec<String>, 
             ExcelValidatorBuilder::new(xlsx.to_str().unwrap(), "Sheet1", sample_schema())
                 .build()
                 .map_err(|e| format!("{e:#}"))?;
+        let error_cells = validator.error_cells_summary().map(String::from);
         validator.validate_excel().map_err(|e| {
             let details: Vec<String> = validator
                 .validation_reports
@@ -65,11 +75,12 @@ fn run_sheet(name: &str, all_rows: &[Vec<common::Cell>]) -> Result<Vec<String>, 
                 create_simple_mapping(vec!["Sample ID", "Depth", "Count", "Notes", "Date"]),
             )
             .map_err(|e| e.to_string())?;
-        Ok(std::fs::read_to_string(&csv)
+        let lines = std::fs::read_to_string(&csv)
             .unwrap()
             .lines()
             .map(String::from)
-            .collect())
+            .collect();
+        Ok((error_cells, lines))
     })();
 
     let _ = std::fs::remove_file(&xlsx);
@@ -135,20 +146,67 @@ fn text_that_is_not_a_date_in_a_date_column_is_a_validation_error() {
     assert!(err.contains("'n/a' is not a valid date"), "{err}");
 }
 
+/// An error value is what a formula gives when its calculation fails (`#VALUE!` from text times a
+/// number), so it carries no data: the cell is uploaded as if it were blank, and listed.
 #[test]
-fn excel_error_cell_stops_the_import_and_names_the_cell() {
-    let err = run_pipeline(
-        "error-cell",
+fn excel_error_cells_are_uploaded_as_blank_cells_and_listed() {
+    let mut rows = vec![headers()];
+    rows.extend([
+        vec![Text("S1"), Number(1.0), Empty, Text("ok"), Empty],
         vec![
-            vec![Text("S1"), Number(1.0), Empty, Empty, Empty],
-            vec![Text("S2"), Error("#N/A"), Empty, Empty, Empty],
+            Text("S2"),
+            Error("#N/A"),
+            Error("#DIV/0!"),
+            Error("#VALUE!"),
+            Empty,
         ],
-    )
-    .unwrap_err();
+    ]);
 
-    assert!(err.contains("#N/A"), "{err}");
-    assert!(err.contains("row 3"), "{err}");
-    assert!(err.contains("Depth"), "{err}");
+    let (error_cells, lines) = run_sheet_with_error_cells("error-cells", &rows).unwrap();
+
+    let expected = vec![
+        "Sample ID,Depth,Count,Notes,Date",
+        "S1,1,0,ok,",
+        "S2,000000000000.000000,0,,",
+    ];
+    assert_eq!(lines, expected);
+    let expected = "Emptied 3 Excel error value(s), uploading them as blank cells:
+  row 3, column B \"Depth\": #N/A
+  row 3, column C \"Count\": #DIV/0!
+  row 3, column D \"Notes\": #VALUE!";
+    assert_eq!(error_cells.as_deref(), Some(expected));
+}
+
+#[test]
+fn without_excel_error_cells_nothing_is_reported_about_them() {
+    let mut rows = vec![headers()];
+    rows.push(vec![Text("S1"), Number(1.0), Empty, Text("ok"), Empty]);
+
+    let (error_cells, _) = run_sheet_with_error_cells("no-error-cells", &rows).unwrap();
+
+    assert_eq!(error_cells, None);
+}
+
+/// An error value without a header is no data either, so it is not refused as data without a
+/// header.
+#[test]
+fn an_excel_error_cell_in_a_column_without_a_header_is_emptied_not_refused() {
+    let mut rows = vec![headers()];
+    rows.push(vec![
+        Text("S1"),
+        Number(1.0),
+        Empty,
+        Empty,
+        Empty,
+        Error("#VALUE!"),
+    ]);
+
+    let (error_cells, lines) = run_sheet_with_error_cells("unnamed-error-cell", &rows).unwrap();
+
+    assert_eq!(lines, vec!["Sample ID,Depth,Count,Notes,Date", "S1,1,0,,"]);
+    let expected = "Emptied 1 Excel error value(s), uploading them as blank cells:
+  row 2, column F: #VALUE!";
+    assert_eq!(error_cells.as_deref(), Some(expected));
 }
 
 #[test]
@@ -260,8 +318,14 @@ fn validation_errors_name_the_row_excel_shows_when_the_table_is_not_at_row_1() {
 fn excel_error_cells_name_the_row_excel_shows_when_the_table_is_not_at_row_1() {
     let mut rows = vec![vec![], headers()];
     rows.push(vec![Text("S1"), Error("#N/A"), Empty, Empty, Empty]);
-    let err = run_sheet("error-cell-row-offset", &rows).unwrap_err();
+    let (error_cells, _) = run_sheet_with_error_cells("error-cell-row-offset", &rows).unwrap();
 
-    let expected = "row 3, column 'Depth': #N/A";
-    assert!(err.contains(expected), "{err}");
+    let expected = "row 3, column B \"Depth\": #N/A";
+    assert!(
+        error_cells
+            .as_deref()
+            .unwrap_or_default()
+            .contains(expected),
+        "{error_cells:?}"
+    );
 }

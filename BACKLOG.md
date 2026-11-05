@@ -18,7 +18,8 @@ Findings from reviewing the code against [ENGINEERING_STANDARDS.md](ENGINEERING_
   from the CSV. Now documented on `NUMERIC_PLACEHOLDER` / `INTEGER_PLACEHOLDER` and in
   `crates/dkan-importer/README.md`, and pinned by `tests/excel_file_pipeline_test.rs`.
 - [x] **Excel error cells (`#N/A`, ...) were uploaded as zero.** They now stop the import with a list of
-  the affected cells.
+  the affected cells. *Reversed on 2026-11-05 at the data owner's request:* error cells are read as blank
+  cells again (so a numeric one is uploaded as the placeholder), and the run lists every one of them.
 - [x] **Ambiguous dates.** Numeric dates are read day-first only. Month-first dates, and any other
   text in a `date`/`date-time` column, are now validation errors (previously uploaded as-is).
 - [x] **Failures writing `errors.log` were ignored.** `write_error_to_log` now returns an error, and

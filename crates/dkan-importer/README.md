@@ -182,7 +182,13 @@ The data dictionary is automatically converted to JSON Schema format for validat
 - Empty cells are converted to `null` values
 - The application performs intelligent type coercion based on the schema
 - Numeric dates are read day-first (`03/04/2024` is 3 April). Month-first dates such as `08/28/2024`, and any other text in a date column, are validation errors
-- Cells containing Excel error values (`#N/A`, `#DIV/0!`, ...) stop the import with a list of the affected cells
+- Cells containing Excel error values (`#VALUE!`, `#N/A`, `#DIV/0!`, ...) are failed calculations, not data, so they are read as blank cells (in a numeric column, that means the placeholder below). Before validating, the importer lists every such cell:
+
+  ```
+  ⚠️  Emptied 2 Excel error value(s), uploading them as blank cells:
+    row 3, column B "Depth": #N/A
+    row 7, column K "ST02": #VALUE!
+  ```
 - Empty cells in numeric columns are uploaded as `000000000000.000000` (number) or `0` (integer), so that DKAN creates numeric columns
 
 Example Excel structure:
