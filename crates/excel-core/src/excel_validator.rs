@@ -216,6 +216,10 @@ impl std::fmt::Display for Question {
     }
 }
 
+/// Units some sheets keep beside their ng/L rows, which are calculated from them by formulas.
+/// They stop the run, to be removed from the source file. Matched ignoring case.
+const NANOGRAMS_PER_MILLILITRE: &str = "ng/mL";
+
 /// A row's units, read from its [`UNITS_FIELD`] cell, ignoring case and surrounding spaces
 #[derive(Debug, PartialEq)]
 enum Units {
@@ -1290,6 +1294,8 @@ impl ExcelValidator {
         let mut wrong_identification_levels: Vec<String> = Vec::new();
         // Results that stop the run until the source is corrected
         let mut refused_results: Vec<String> = Vec::new();
+        // Rows in ng/mL, which stop the run until they are removed from the source
+        let mut ng_per_ml_rows: Vec<String> = Vec::new();
         // The open questions, each with the number of cells concerned
         let mut questions: BTreeMap<Question, usize> = BTreeMap::new();
         let mut parsed_rows: Vec<ParsedExcelRow> = Vec::new();
@@ -1465,6 +1471,11 @@ impl ExcelValidator {
                 )),
             }
             let units = Units::parse(row.get(samples.units));
+            if matches!(&units, Units::Other(units) if units.eq_ignore_ascii_case(NANOGRAMS_PER_MILLILITRE))
+            {
+                ng_per_ml_rows.push(format!("row {row_number}"));
+                continue;
+            }
             let lod = number_in(&json_obj, LOD_FIELD);
             let loq = number_in(&json_obj, LOQ_FIELD);
             let sheet_detection = json_obj
@@ -1606,6 +1617,15 @@ impl ExcelValidator {
                 self.sheet_name,
                 refused_results.len(),
                 refused_results.join("\n  ")
+            ));
+        }
+
+        if !ng_per_ml_rows.is_empty() {
+            problems.push(format!(
+                "The sheet \"{}\" has {} row(s) in {NANOGRAMS_PER_MILLILITRE}. Only ng/L is imported, and the ng/L rows are usually calculated from the {NANOGRAMS_PER_MILLILITRE} rows by formulas: replace those formulas with their values, then delete the {NANOGRAMS_PER_MILLILITRE} rows in the source file and try again:\n  {}",
+                self.sheet_name,
+                ng_per_ml_rows.len(),
+                ng_per_ml_rows.join("\n  ")
             ));
         }
 

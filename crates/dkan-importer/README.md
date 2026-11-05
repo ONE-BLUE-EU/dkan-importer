@@ -144,7 +144,8 @@ Each result's "Detection characterisation" is worked out from its row's "Concent
 
 - Where the result's characterisation differs from the sheet's own, the run log says so, with the reason: `row 2, column AQ "24019033": Detection characterisation "detected, not quantified" instead of "detected quantitatively": the result is <LOQ`.
 - These stop the run before anything is written or uploaded, listing each cell to correct in the source file: `X` in an ng/L row (X is a Peak Area result), and an items result that is not a whole number of 0 or more.
-- What is not clear yet is not imported: the cell gives no row, the run log lists it, and asks the data owners one question per kind of case, with the number of cells. The importer prints how many questions there are. These are: an ng/L row without both limits, a number in a Peak Area row, other units (such as ng/mL), any other result without units or with a marker that has no characterisation. "detected, not quantified" is also asked about, as the template's dropdown list has "detected semiquantitatively" instead.
+- Rows in ng/mL stop the run too, listed by row: only ng/L is imported. In sheets that keep them, the ng/L rows are calculated from the ng/mL rows by formulas, so replace those formulas with their values, then delete the ng/mL rows in the source file.
+- What is not clear yet is not imported: the cell gives no row, the run log lists it, and asks the data owners one question per kind of case, with the number of cells. The importer prints how many questions there are. These are: an ng/L row without both limits, a number in a Peak Area row, other units (such as ug/kg), any other result without units or with a marker that has no characterisation. "detected, not quantified" is also asked about, as the template's dropdown list has "detected semiquantitatively" instead.
 
 ### Keeping extra columns
 
@@ -252,7 +253,7 @@ Blank sample cells are not listed, as a sheet has thousands: the summary line co
 
 Rows that fail validation are not changes: they are listed in `errors.log`.
 
-Problems that must be corrected in the source file (an Identification Level that is not `2A`, results that cannot be imported, data in a column without a header) stop the run only once every row has been read. So one run reports all of them together, after the summary, the changes and the questions, and nothing is written or uploaded.
+Problems that must be corrected in the source file (an Identification Level that is not `2A`, results that cannot be imported, rows in ng/mL, data in a column without a header) stop the run only once every row has been read. So one run reports all of them together, after the summary, the changes and the questions, and nothing is written or uploaded.
 
 ### Error Log File
 The application creates an `errors.log` file containing:

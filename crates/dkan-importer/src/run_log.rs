@@ -128,13 +128,13 @@ mod tests {
     fn questions_are_listed_once_each_with_their_cell_count() {
         let questions = [
             (Question::NumberInPeakArea, 3),
-            (Question::OtherUnits("ng/mL".to_string()), 12),
+            (Question::OtherUnits("ug/kg".to_string()), 12),
         ];
 
         let expected = vec![
             "2 question(s) about the data, for the data owners to answer. The cells concerned are listed above.",
             "  [3 cell(s)] Numbers in Peak Area rows are not imported. Should they be imported as the Concentration, with which detection characterisation, and should a field mark them as peak areas?",
-            "  [12 cell(s)] Rows with Concentration units \"ng/mL\" are not imported. How should they be handled?",
+            "  [12 cell(s)] Rows with Concentration units \"ug/kg\" are not imported. How should they be handled?",
         ];
         assert_eq!(questions_lines(&questions), expected);
     }

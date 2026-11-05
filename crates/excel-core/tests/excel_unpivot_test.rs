@@ -1366,12 +1366,12 @@ fn unclear_results_give_no_row_and_a_question() {
         vec![
             vec![Empty, Text("ng/L"), Number(0.1), Empty, Number(0.3)],
             vec![Empty, Text("Peak Area"), Empty, Empty, Number(1234.0)],
-            vec![Empty, Text("ng/mL"), Number(0.1), Number(0.25), Number(0.3)],
+            vec![Empty, Text("ug/kg"), Number(0.1), Number(0.25), Number(0.3)],
             vec![Empty, Empty, Empty, Empty, Number(0.3)],
             vec![Empty, Text("Peak Area"), Empty, Empty, Text("<LOD")],
             vec![
                 Empty,
-                Text("ng/mL"),
+                Text("ug/kg"),
                 Number(0.1),
                 Number(0.25),
                 Text("<LOQ"),
@@ -1391,16 +1391,16 @@ fn unclear_results_give_no_row_and_a_question() {
     let expected = vec![
         "row 2, column G \"ST01\": no row: the ng/L row has no Limit of detection or no Limit of quantification, so its results cannot be characterised",
         "row 3, column G \"ST01\": no row: a number in a Peak Area row",
-        "row 4, column G \"ST01\": no row: Concentration units \"ng/mL\" are not imported",
+        "row 4, column G \"ST01\": no row: Concentration units \"ug/kg\" are not imported",
         "row 5, column G \"ST01\": no row: a number in a row without Concentration units",
         "row 6, column G \"ST01\": no row: \"<LOD\" in a row with Concentration units \"Peak Area\"",
-        "row 7, column G \"ST01\": no row: Concentration units \"ng/mL\" are not imported",
+        "row 7, column G \"ST01\": no row: Concentration units \"ug/kg\" are not imported",
     ];
     assert_eq!(unpivoted.changes, expected);
     let expected = vec![
         "1 cell(s): ng/L rows without a Limit of detection or a Limit of quantification are not imported, as their results cannot be characterised. Should they be imported, and how?",
         "1 cell(s): Numbers in Peak Area rows are not imported. Should they be imported as the Concentration, with which detection characterisation, and should a field mark them as peak areas?",
-        "2 cell(s): Rows with Concentration units \"ng/mL\" are not imported. How should they be handled?",
+        "2 cell(s): Rows with Concentration units \"ug/kg\" are not imported. How should they be handled?",
         "1 cell(s): \"<LOD\" in a row with Concentration units \"Peak Area\" is not imported. What does it mean?",
         "1 cell(s): A number in a row without Concentration units is not imported. What does it mean?",
     ];
@@ -1522,10 +1522,9 @@ fn every_problem_is_reported_in_one_run_with_the_changes_and_questions() {
         .to_string();
     let _ = std::fs::remove_file(&xlsx);
 
-    let expected =
-        vec!["row 3, column G \"ST01\": no row: Concentration units \"ng/mL\" are not imported"];
-    assert_eq!(changes, expected);
-    assert_eq!(questions.len(), 2, "{questions:?}");
+    assert_eq!(changes, Vec::<String>::new());
+    // Only "detected, not quantified", for row 2's 0.2
+    assert_eq!(questions.len(), 1, "{questions:?}");
     let expected = "The sheet \"Sheet1\" has 2 result(s) that cannot be imported. Correct these cells in the source file and try again:
   row 2, column G \"ST01\": 'X' in an ng/L row: X is a Peak Area result, so correct the Concentration units or the result
   row 4, column G \"ST01\": '1.5' is not a whole number of items";
@@ -1533,4 +1532,48 @@ fn every_problem_is_reported_in_one_run_with_the_changes_and_questions() {
     let expected = "The sheet \"Sheet1\" has 1 row(s) whose Identification Level is not 2A. Analytical results are always identification level 2A: correct these cells in the source file and try again:
   row 3: 1";
     assert!(err.contains(expected), "{err}");
+    assert!(err.contains("has 1 row(s) in ng/mL"), "{err}");
+}
+
+/// Only ng/L is imported. The ng/L rows are calculated from the ng/mL rows by formulas, so the
+/// ng/mL rows must go from the source file, once the formulas are replaced by their values.
+#[test]
+fn ng_ml_rows_stop_the_run_asking_to_remove_them_from_the_source() {
+    let rows = analytical_sheet(
+        &["ST01", "ST02"],
+        vec![
+            vec![
+                Empty,
+                Text("ng/mL"),
+                Number(0.1),
+                Number(0.25),
+                Number(0.3),
+                Empty,
+            ],
+            vec![
+                Empty,
+                Text("ng/L"),
+                Number(100.0),
+                Number(250.0),
+                Number(300.0),
+                Empty,
+            ],
+            vec![
+                Empty,
+                Text(" NG/ml "),
+                Number(0.1),
+                Number(0.25),
+                Empty,
+                Text("<LOQ"),
+            ],
+        ],
+    );
+
+    let err = run_with_schema("detection-ng-ml", &rows, spec(), text_schema()).unwrap_err();
+
+    let expected = "The sheet \"Sheet1\" has 2 row(s) in ng/mL. Only ng/L is imported, and the ng/L rows are usually calculated from the ng/mL rows by formulas: replace those formulas with their values, then delete the ng/mL rows in the source file and try again:
+  row 2
+  row 4";
+    assert!(err.contains(expected), "{err}");
+    assert!(!err.contains("row 3"), "{err}");
 }
