@@ -823,8 +823,6 @@ fn nd_cells_are_treated_as_ns_and_give_no_row() {
         "row 2, column F \"ST01\": no row: \"ND\" is treated as NS (no sample)",
         "row 2, column G \"ST02\": no row: \"nd\" is treated as NS (no sample)",
         "row 2, column H \"ST03\": no row: \"NS\" means no sample",
-        "row 3, column G \"ST02\": no row: blank cell, no result",
-        "row 3, column H \"ST03\": no row: blank cell, no result",
     ];
     assert_eq!(unpivoted.changes, expected);
     assert!(
@@ -1147,7 +1145,8 @@ fn ns_among_the_given_markers_is_refused_as_it_gives_no_row() {
 }
 
 /// Every change to a sample cell is listed, in sheet order, with its reason; cells taken as
-/// written are not.
+/// written are not, and neither are blank cells, which the summary only counts: a sheet has
+/// thousands.
 #[test]
 fn every_change_to_a_sample_cell_is_listed_with_its_reason() {
     let mut rows = limits_sheet(Number(0.25), [Text("<loq:0.25"), Text(" ns "), Empty]);
@@ -1167,9 +1166,7 @@ fn every_change_to_a_sample_cell_is_listed_with_its_reason() {
     let expected = vec![
         "row 2, column F \"ST01\": written as \"<LOQ\" instead of \"<loq:0.25\": the number after the marker is the row's Limit of quantification",
         "row 2, column G \"ST02\": no row: \"ns\" means no sample",
-        "row 2, column H \"ST03\": no row: blank cell, no result",
         "row 3, column F \"ST01\": emptied: Excel error #VALUE!, a failed calculation, read as a blank cell",
-        "row 3, column F \"ST01\": no row: blank cell, no result",
         "row 3, column G \"ST02\": written as \"<LOD\" instead of \"<lod\": markers are written uppercase",
     ];
     assert_eq!(unpivoted.changes, expected);

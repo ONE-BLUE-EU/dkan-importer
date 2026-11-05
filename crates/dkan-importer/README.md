@@ -242,12 +242,13 @@ Every run writes `<sheet>_<dataset>.run.log` in the current directory (the sheet
 - Every change made to a cell instead of taking it as written, one line per cell with its reason, so the data can be checked and corrected at its source:
 
 ```
-6 cell change(s), each with its reason:
+3 cell change(s), each with its reason:
   row 2, column E "ST01": written as "<LOQ" instead of "<loq:0.25": the number after the marker is the row's Limit of quantification
   row 2, column F "ST02": no row: "ns" means no sample
-  row 2, column G "ST03": no row: blank cell, no result
   row 3, column E "ST01": emptied: Excel error #VALUE!, a failed calculation, read as a blank cell
 ```
+
+Blank sample cells are not listed, as a sheet has thousands: the summary line counts them.
 
 Rows that fail validation are not changes: they are listed in `errors.log`.
 

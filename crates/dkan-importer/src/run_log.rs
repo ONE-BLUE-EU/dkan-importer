@@ -102,7 +102,7 @@ mod tests {
         let changes = [
             Change::Skipped {
                 cell: cell(),
-                reason: SkipReason::Blank,
+                reason: SkipReason::NoSample("NS".to_string()),
             },
             Change::Skipped {
                 cell: cell(),
@@ -112,7 +112,7 @@ mod tests {
 
         let expected = vec![
             "2 cell change(s), each with its reason:",
-            "  row 4, column L \"ST03\": no row: blank cell, no result",
+            "  row 4, column L \"ST03\": no row: \"NS\" means no sample",
             "  row 4, column L \"ST03\": no row: a number in a Peak Area row",
         ];
         assert_eq!(changes_lines(&changes), expected);

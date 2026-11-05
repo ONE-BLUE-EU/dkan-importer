@@ -70,11 +70,10 @@ pub enum Change {
     },
 }
 
-/// Why a sample cell gives no row
+/// Why a sample cell gives no row. A blank one gives none either, but is only counted in the
+/// summary, not listed.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SkipReason {
-    /// Blank: no result
-    Blank,
     /// No sample was taken; the cell's text as written, trimmed
     NoSample(String),
     /// Not clear yet how to import it: see the question
@@ -88,10 +87,6 @@ impl std::fmt::Display for Change {
                 f,
                 "{cell}: emptied: Excel error {error}, a failed calculation, read as a blank cell"
             ),
-            Change::Skipped {
-                cell,
-                reason: SkipReason::Blank,
-            } => write!(f, "{cell}: no row: blank cell, no result"),
             Change::Skipped {
                 cell,
                 reason: SkipReason::NoSample(text),
@@ -1462,11 +1457,8 @@ impl ExcelValidator {
                 .map(String::from);
             for (col_idx, header) in &samples.columns {
                 let Some(cell) = row.get(*col_idx).filter(|cell| !is_blank(cell)) else {
+                    // Counted in the summary, not listed: a sheet has thousands
                     blank_sample_cells = blank_sample_cells.saturating_add(1);
-                    changes.push(Change::Skipped {
-                        cell: sheet_cell(*col_idx),
-                        reason: SkipReason::Blank,
-                    });
                     continue;
                 };
                 if is_no_result(cell) {
