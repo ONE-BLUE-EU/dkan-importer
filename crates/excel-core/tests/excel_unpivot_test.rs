@@ -62,6 +62,8 @@ struct Unpivoted {
     error_cells: Option<String>,
     /// Every change the validator made to a cell, with its reason, as the run log shows it
     changes: Vec<String>,
+    /// Each open question about the data, as the run log shows it: "N cell(s): question"
+    questions: Vec<String>,
     /// The exported CSV
     csv: String,
     /// [`Unpivoted::columns`] of Substance, Sample Tag and Concentration, the columns most tests
@@ -126,6 +128,11 @@ fn run_with_schema(
             .iter()
             .map(ToString::to_string)
             .collect();
+        let questions = validator
+            .questions()
+            .iter()
+            .map(|(question, cells)| format!("{cells} cell(s): {question}"))
+            .collect();
         validator.validate_excel().map_err(|e| {
             let details: Vec<String> = validator
                 .validation_reports
@@ -153,6 +160,7 @@ fn run_with_schema(
             summary,
             error_cells,
             changes,
+            questions,
             csv: std::fs::read_to_string(&csv).unwrap(),
             csv_lines: Vec::new(),
         };
@@ -242,7 +250,7 @@ fn blank_sample_cells_in_every_form_produce_no_row() {
         "Azaspiracid-2,ST01,1.25",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
-    let expected = "Keeping 5 column(s) A-E (Substance … Limit of quantification); unpivoting 3 column(s) F-H (ST01 … ST03) into Sample Tag / Concentration: 1 row(s); 5 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ.";
+    let expected = "Keeping 5 column(s) A-E (Substance … Limit of quantification); unpivoting 3 column(s) F-H (ST01 … ST03) into Sample Tag / Concentration: 1 row(s); 5 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ, X.";
     assert_eq!(unpivoted.summary, expected);
 }
 
@@ -424,17 +432,28 @@ fn a_sample_column_without_a_header_is_refused() {
         vec![
             Text("Substance"),
             Text("Identification Level"),
+            Text("Concentration units"),
+            Text("Limit of detection"),
+            Text("Limit of quantification"),
             Text("ST01"),
             Empty,
         ],
-        vec![Text("Okadaic acid"), Text("2A"), Number(0.88), Number(0.4)],
+        vec![
+            Text("Okadaic acid"),
+            Text("2A"),
+            Text("ng/L"),
+            Number(0.01),
+            Number(0.02),
+            Number(0.88),
+            Number(0.4),
+        ],
     ];
 
     let err = run("unpivot-unnamed-sample", &rows, spec())
         .expect_err("a sample column without a header must be refused");
 
     assert!(
-        err.contains("column D (first value at row 2: \"0.4\")"),
+        err.contains("column G (first value at row 2: \"0.4\")"),
         "{err}"
     );
 }
@@ -578,7 +597,7 @@ fn the_summary_of_a_text_values_field_names_the_markers() {
     )
     .unwrap();
 
-    let expected = "Keeping 5 column(s) A-E (Substance … Limit of quantification); unpivoting 2 column(s) F-G (ST01 … ST02) into Sample Tag / Concentration: 3 row(s); 1 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ.";
+    let expected = "Keeping 5 column(s) A-E (Substance … Limit of quantification); unpivoting 2 column(s) F-G (ST01 … ST02) into Sample Tag / Concentration: 3 row(s); 1 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ, X.";
     assert_eq!(unpivoted.summary, expected);
 }
 
@@ -625,7 +644,7 @@ fn a_marker_followed_by_the_rows_limit_is_written_as_the_marker() {
         "Okadaic acid,ST03,0.3",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
-    let expected_summary = "Concentration takes numbers or <LOD, <LOQ. 2 value(s) written as their marker alone, the number after it being the row's limit: <LOD (Limit of detection), <LOQ (Limit of quantification).";
+    let expected_summary = "Concentration takes numbers or <LOD, <LOQ, X. 2 value(s) written as their marker alone, the number after it being the row's limit: <LOD (Limit of detection), <LOQ (Limit of quantification).";
     assert!(
         unpivoted.summary.ends_with(expected_summary),
         "{}",
@@ -642,7 +661,7 @@ fn without_such_values_the_summary_does_not_mention_limits() {
     assert!(
         unpivoted
             .summary
-            .ends_with("Concentration takes numbers or <LOD, <LOQ."),
+            .ends_with("Concentration takes numbers or <LOD, <LOQ, X."),
         "{}",
         unpivoted.summary
     );
@@ -889,18 +908,18 @@ fn nq_in_a_sample_cell_is_a_validation_error_pointing_to_loq() {
 #[test]
 fn markers_match_ignoring_case_and_are_written_uppercase() {
     let unpivot = Unpivot {
-        values_markers: vec!["<LOD".to_string(), "X".to_string()],
+        values_markers: vec!["<LOD".to_string(), "<LOQ".to_string()],
         ..spec()
     };
-    let mut rows = marker_sheet([Text("x"), Text(" X "), Text("<lod")]);
+    let mut rows = marker_sheet([Text("<loq"), Text(" <LoQ "), Text("<lod")]);
     rows.push(vec![
         Text("Azaspiracid-2"),
         Text("2A"),
         Text("ng/L"),
         Number(0.01),
         Number(0.02),
-        Text("X"),
-        Text(" x"),
+        Text("<LOQ"),
+        Text(" <loq"),
         Text("<LoD"),
     ]);
 
@@ -908,11 +927,11 @@ fn markers_match_ignoring_case_and_are_written_uppercase() {
 
     let expected = vec![
         "Substance,Sample Tag,Concentration",
-        "Okadaic acid,ST01,X",
-        "Okadaic acid,ST02,X",
+        "Okadaic acid,ST01,<LOQ",
+        "Okadaic acid,ST02,<LOQ",
         "Okadaic acid,ST03,<LOD",
-        "Azaspiracid-2,ST01,X",
-        "Azaspiracid-2,ST02,X",
+        "Azaspiracid-2,ST01,<LOQ",
+        "Azaspiracid-2,ST02,<LOQ",
         "Azaspiracid-2,ST03,<LOD",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
@@ -1090,7 +1109,7 @@ fn ns_cells_give_no_row_and_are_counted() {
         "Okadaic acid,ST03,0.4",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
-    let expected = "Keeping 5 column(s) A-E (Substance … Limit of quantification); unpivoting 3 column(s) F-H (ST01 … ST03) into Sample Tag / Concentration: 1 row(s); 2 NS or ND (no sample) cell(s) skipped. Concentration takes numbers or <LOD, <LOQ.";
+    let expected = "Keeping 5 column(s) A-E (Substance … Limit of quantification); unpivoting 3 column(s) F-H (ST01 … ST03) into Sample Tag / Concentration: 1 row(s); 2 NS or ND (no sample) cell(s) skipped. Concentration takes numbers or <LOD, <LOQ, X.";
     assert_eq!(unpivoted.summary, expected);
 }
 
@@ -1163,4 +1182,302 @@ fn a_sheet_taken_as_written_lists_no_changes() {
     let unpivoted = run_with_schema("unpivot-no-changes", &rows, spec(), text_schema()).unwrap();
 
     assert_eq!(unpivoted.changes, Vec::<String>::new());
+}
+
+// Detection characterisation: worked out for each result from the row's units and limits
+
+/// A sheet with the source's own Detection characterisation column (C), and samples `tags` from
+/// column G. Each of `rows` is: detection characterisation, units, LOD, LOQ, then its results.
+fn analytical_sheet(tags: &[&'static str], rows: Vec<Vec<Cell>>) -> Vec<Vec<Cell>> {
+    let mut header = vec![
+        Text("Substance"),
+        Text("Identification Level"),
+        Text("Detection characterisation"),
+        Text("Concentration units"),
+        Text("Limit of detection"),
+        Text("Limit of quantification"),
+    ];
+    header.extend(tags.iter().map(|tag| Text(tag)));
+    let mut sheet = vec![header];
+    sheet.extend(rows.into_iter().map(|row| {
+        let mut cells = vec![Text("Okadaic acid"), Text("2A")];
+        cells.extend(row);
+        cells
+    }));
+    sheet
+}
+
+const RESULTS: [&str; 3] = ["Sample Tag", "Concentration", "Detection characterisation"];
+
+#[test]
+fn ng_l_results_are_characterised_against_the_rows_limits() {
+    let tags = [
+        "ST01", "ST02", "ST03", "ST04", "ST05", "ST06", "ST07", "ST08",
+    ];
+    let rows = analytical_sheet(
+        &tags,
+        vec![
+            vec![
+                Empty,
+                Text("ng/L"),
+                Number(0.1),
+                Number(0.25),
+                Number(0.3),
+                Number(0.25),
+                Number(0.2),
+                Number(0.1),
+                Number(0.05),
+                Text("<LOD"),
+                Text("<LOQ"),
+                Text("<LOQ:0.25"),
+            ],
+            // Units match ignoring case and spaces
+            vec![
+                Empty,
+                Text(" NG/l "),
+                Number(0.1),
+                Number(0.25),
+                Number(0.3),
+            ],
+        ],
+    );
+
+    let unpivoted = run_with_schema("detection-ng-l", &rows, spec(), text_schema()).unwrap();
+
+    let expected = vec![
+        "Sample Tag,Concentration,Detection characterisation",
+        "ST01,0.3,detected quantitatively",
+        "ST02,0.25,detected quantitatively",
+        "ST03,0.2,detected, not quantified",
+        "ST04,0.1,detected, not quantified",
+        "ST05,0.05,not detected",
+        "ST06,<LOD,not detected",
+        "ST07,<LOQ,detected, not quantified",
+        "ST08,<LOQ,detected, not quantified",
+        "ST01,0.3,detected quantitatively",
+    ];
+    assert_eq!(unpivoted.columns(&RESULTS), expected);
+    let expected = vec![
+        "4 cell(s): Results between the Limit of detection and the Limit of quantification, and <LOQ, are characterised as \"detected, not quantified\", which the template's dropdown list does not have (it has \"detected semiquantitatively\"). Which should be used?",
+    ];
+    assert_eq!(unpivoted.questions, expected);
+}
+
+#[test]
+fn x_is_detected_qualitatively_in_peak_area_rows_and_in_rows_without_units() {
+    let rows = analytical_sheet(
+        &["ST01", "ST02"],
+        vec![
+            vec![Empty, Text("Peak Area"), Empty, Empty, Text("X"), Text("x")],
+            vec![Empty, Text("peak area"), Empty, Empty, Text("X"), Empty],
+            vec![Empty, Empty, Empty, Empty, Text("X"), Empty],
+        ],
+    );
+
+    let unpivoted = run_with_schema("detection-x", &rows, spec(), text_schema()).unwrap();
+
+    let expected = vec![
+        "Sample Tag,Concentration,Detection characterisation",
+        "ST01,X,detected qualitatively",
+        "ST02,X,detected qualitatively",
+        "ST01,X,detected qualitatively",
+        "ST01,X,detected qualitatively",
+    ];
+    assert_eq!(unpivoted.columns(&RESULTS), expected);
+    let expected = vec![
+        "1 cell(s): X results in rows without Concentration units are taken as Peak Area (detected qualitatively), without writing the units. Is that right?",
+    ];
+    assert_eq!(unpivoted.questions, expected);
+}
+
+#[test]
+fn items_are_whole_numbers_detected_quantitatively() {
+    let rows = analytical_sheet(
+        &["ST01", "ST02"],
+        vec![vec![
+            Empty,
+            Text("items"),
+            Empty,
+            Empty,
+            Number(3.0),
+            Number(0.0),
+        ]],
+    );
+
+    let unpivoted = run_with_schema("detection-items", &rows, spec(), text_schema()).unwrap();
+
+    let expected = vec![
+        "Sample Tag,Concentration,Detection characterisation",
+        "ST01,3,detected quantitatively",
+        "ST02,0,detected quantitatively",
+    ];
+    assert_eq!(unpivoted.columns(&RESULTS), expected);
+    assert_eq!(unpivoted.questions, Vec::<String>::new());
+}
+
+#[test]
+fn items_that_are_not_whole_numbers_stop_the_run_listing_each() {
+    let rows = analytical_sheet(
+        &["ST01", "ST02", "ST03"],
+        vec![vec![
+            Empty,
+            Text("items"),
+            Empty,
+            Empty,
+            Number(1.5),
+            Text("<LOD"),
+            Number(2.0),
+        ]],
+    );
+
+    let err = run_with_schema("detection-items-bad", &rows, spec(), text_schema()).unwrap_err();
+
+    let expected = "The sheet \"Sheet1\" has 2 result(s) that cannot be imported. Correct these cells in the source file and try again:
+  row 2, column G \"ST01\": '1.5' is not a whole number of items
+  row 2, column H \"ST02\": '<LOD' is not a whole number of items";
+    assert!(err.contains(expected), "{err}");
+    assert!(!err.contains("column I"), "{err}");
+}
+
+/// X is a Peak Area result, so in an ng/L row the units or the result are wrong.
+#[test]
+fn x_in_an_ng_l_row_stops_the_run() {
+    let rows = analytical_sheet(
+        &["ST01", "ST02"],
+        vec![vec![
+            Empty,
+            Text("ng/L"),
+            Number(0.1),
+            Number(0.25),
+            Text("X"),
+            Number(0.3),
+        ]],
+    );
+
+    let err = run_with_schema("detection-x-ng-l", &rows, spec(), text_schema()).unwrap_err();
+
+    let expected = "row 2, column G \"ST01\": 'X' in an ng/L row: X is a Peak Area result, so correct the Concentration units or the result";
+    assert!(err.contains(expected), "{err}");
+    assert!(!err.contains("column H"), "{err}");
+}
+
+/// What is not clear yet is not imported, and asked about once per kind, with its cell count.
+#[test]
+fn unclear_results_give_no_row_and_a_question() {
+    let rows = analytical_sheet(
+        &["ST01"],
+        vec![
+            vec![Empty, Text("ng/L"), Number(0.1), Empty, Number(0.3)],
+            vec![Empty, Text("Peak Area"), Empty, Empty, Number(1234.0)],
+            vec![Empty, Text("ng/mL"), Number(0.1), Number(0.25), Number(0.3)],
+            vec![Empty, Empty, Empty, Empty, Number(0.3)],
+            vec![Empty, Text("Peak Area"), Empty, Empty, Text("<LOD")],
+            vec![
+                Empty,
+                Text("ng/mL"),
+                Number(0.1),
+                Number(0.25),
+                Text("<LOQ"),
+            ],
+            // A sheet without any result to import is refused as empty
+            vec![Empty, Text("ng/L"), Number(0.1), Number(0.25), Number(0.3)],
+        ],
+    );
+
+    let unpivoted = run_with_schema("detection-unclear", &rows, spec(), text_schema()).unwrap();
+
+    let expected = vec![
+        "Sample Tag,Concentration,Detection characterisation",
+        "ST01,0.3,detected quantitatively",
+    ];
+    assert_eq!(unpivoted.columns(&RESULTS), expected);
+    let expected = vec![
+        "row 2, column G \"ST01\": no row: the ng/L row has no Limit of detection or no Limit of quantification, so its results cannot be characterised",
+        "row 3, column G \"ST01\": no row: a number in a Peak Area row",
+        "row 4, column G \"ST01\": no row: Concentration units \"ng/mL\" are not imported",
+        "row 5, column G \"ST01\": no row: a number in a row without Concentration units",
+        "row 6, column G \"ST01\": no row: \"<LOD\" in a row with Concentration units \"Peak Area\"",
+        "row 7, column G \"ST01\": no row: Concentration units \"ng/mL\" are not imported",
+    ];
+    assert_eq!(unpivoted.changes, expected);
+    let expected = vec![
+        "1 cell(s): ng/L rows without a Limit of detection or a Limit of quantification are not imported, as their results cannot be characterised. Should they be imported, and how?",
+        "1 cell(s): Numbers in Peak Area rows are not imported. Should they be imported as the Concentration, with which detection characterisation, and should a field mark them as peak areas?",
+        "2 cell(s): Rows with Concentration units \"ng/mL\" are not imported. How should they be handled?",
+        "1 cell(s): \"<LOD\" in a row with Concentration units \"Peak Area\" is not imported. What does it mean?",
+        "1 cell(s): A number in a row without Concentration units is not imported. What does it mean?",
+    ];
+    assert_eq!(unpivoted.questions, expected);
+}
+
+/// The characterisation replaces the sheet's own; where they differ, the run log says why.
+#[test]
+fn a_characterisation_that_differs_from_the_sheets_is_listed_with_its_reason() {
+    let rows = analytical_sheet(
+        &["ST01", "ST02", "ST03"],
+        vec![vec![
+            Text("detected quantitatively"),
+            Text("ng/L"),
+            Number(0.1),
+            Number(0.25),
+            Number(0.3),
+            Number(0.2),
+            Text("<LOD"),
+        ]],
+    );
+
+    let unpivoted = run_with_schema("detection-differs", &rows, spec(), text_schema()).unwrap();
+
+    let expected = vec![
+        "Sample Tag,Concentration,Detection characterisation",
+        "ST01,0.3,detected quantitatively",
+        "ST02,0.2,detected, not quantified",
+        "ST03,<LOD,not detected",
+    ];
+    assert_eq!(unpivoted.columns(&RESULTS), expected);
+    let expected = vec![
+        "row 2, column H \"ST02\": Detection characterisation \"detected, not quantified\" instead of \"detected quantitatively\": 0.2 is between the Limit of detection (0.1) and the Limit of quantification (0.25)",
+        "row 2, column I \"ST03\": Detection characterisation \"not detected\" instead of \"detected quantitatively\": the result is <LOD",
+    ];
+    assert_eq!(unpivoted.changes, expected);
+}
+
+#[test]
+fn a_dictionary_without_the_detection_characterisation_field_is_refused() {
+    let mut schema = text_schema();
+    schema["properties"]
+        .as_object_mut()
+        .unwrap()
+        .remove("Detection characterisation")
+        .expect("the test dictionary has the field to remove");
+
+    let err = run_with_schema("detection-no-field", &wide_sheet(), spec(), schema).unwrap_err();
+
+    let expected = "the data dictionary has no field \"Detection characterisation\", which analytical results need";
+    assert!(err.contains(expected), "{err}");
+}
+
+#[test]
+fn a_sheet_without_the_concentration_units_column_is_refused() {
+    let rows = vec![
+        vec![
+            Text("Substance"),
+            Text("Identification Level"),
+            Text("Limit of detection"),
+            Text("Limit of quantification"),
+            Text("ST01"),
+        ],
+        vec![
+            Text("Okadaic acid"),
+            Text("2A"),
+            Number(0.1),
+            Number(0.25),
+            Number(0.3),
+        ],
+    ];
+
+    let err = run("detection-no-units", &rows, spec()).unwrap_err();
+
+    let expected = "it has no \"Concentration units\" column before the sample columns";
+    assert!(err.contains(expected), "{err}");
 }

@@ -59,6 +59,15 @@ pub enum Change {
         now: String,
         reason: String,
     },
+    /// A field of the result of the sample cell `cell` worked out by the importer, differing from
+    /// the row's own value `was`
+    Derived {
+        cell: SheetCell,
+        field: String,
+        value: String,
+        was: String,
+        reason: String,
+    },
 }
 
 /// Why a sample cell gives no row
@@ -68,6 +77,8 @@ pub enum SkipReason {
     Blank,
     /// No sample was taken; the cell's text as written, trimmed
     NoSample(String),
+    /// Not clear yet how to import it: see the question
+    Open(Question),
 }
 
 impl std::fmt::Display for Change {
@@ -103,9 +114,270 @@ impl std::fmt::Display for Change {
                 f,
                 "{cell}: written as \"{now}\" instead of \"{was}\": {reason}"
             ),
+            Change::Skipped {
+                cell,
+                reason: SkipReason::Open(question),
+            } => write!(f, "{cell}: no row: {}", question.reason()),
+            Change::Derived {
+                cell,
+                field,
+                value,
+                was,
+                reason,
+            } => write!(
+                f,
+                "{cell}: {field} \"{value}\" instead of \"{was}\": {reason}"
+            ),
         }
     }
 }
+
+/// Something about the data the importer cannot decide alone. The cells concerned are not
+/// imported, or imported on an assumption, and the run log asks the question once, with the number
+/// of cells, for the data owners to answer.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Question {
+    /// An ng/L row without both limits: its results cannot be characterised
+    MissingLimits,
+    /// A number in a Peak Area row
+    NumberInPeakArea,
+    /// Units other than ng/L, Peak Area and items, as written
+    OtherUnits(String),
+    /// A result that means nothing yet with its row's units: what the result is (`a number` or
+    /// a marker in quotes), and the units as written, if any
+    UnclassifiedResult {
+        result: String,
+        units: Option<String>,
+    },
+    /// X in a row without units, characterised as a Peak Area result
+    EmptyUnitsTakenAsPeakArea,
+    /// "detected, not quantified" is not in the template's dropdown list
+    DetectedNotQuantified,
+}
+
+impl Question {
+    /// Why a cell gives no row because of this question, for its line in the run log
+    fn reason(&self) -> String {
+        match self {
+            Question::MissingLimits => format!(
+                "the ng/L row has no {LOD_FIELD} or no {LOQ_FIELD}, so its results cannot be characterised"
+            ),
+            Question::NumberInPeakArea => "a number in a Peak Area row".to_string(),
+            Question::OtherUnits(units) => format!("{UNITS_FIELD} \"{units}\" are not imported"),
+            Question::UnclassifiedResult { result, units } => {
+                format!("{result} in a row {}", units_phrase(units.as_deref()))
+            }
+            Question::EmptyUnitsTakenAsPeakArea => {
+                "X in a row without Concentration units, taken as Peak Area".to_string()
+            }
+            Question::DetectedNotQuantified => DETECTED_NOT_QUANTIFIED.to_string(),
+        }
+    }
+}
+
+/// "with Concentration units "u"", or "without Concentration units"
+fn units_phrase(units: Option<&str>) -> String {
+    match units {
+        Some(units) => format!("with {UNITS_FIELD} \"{units}\""),
+        None => format!("without {UNITS_FIELD}"),
+    }
+}
+
+impl std::fmt::Display for Question {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Question::MissingLimits => write!(
+                f,
+                "ng/L rows without a {LOD_FIELD} or a {LOQ_FIELD} are not imported, as their results cannot be characterised. Should they be imported, and how?"
+            ),
+            Question::NumberInPeakArea => write!(
+                f,
+                "Numbers in Peak Area rows are not imported. Should they be imported as the Concentration, with which detection characterisation, and should a field mark them as peak areas?"
+            ),
+            Question::OtherUnits(units) => write!(
+                f,
+                "Rows with {UNITS_FIELD} \"{units}\" are not imported. How should they be handled?"
+            ),
+            Question::UnclassifiedResult { result, units } => {
+                let mut result = result.clone();
+                if let Some(first) = result.get(..1) {
+                    result.replace_range(..1, &first.to_uppercase());
+                }
+                write!(
+                    f,
+                    "{result} in a row {} is not imported. What does it mean?",
+                    units_phrase(units.as_deref())
+                )
+            }
+            Question::EmptyUnitsTakenAsPeakArea => write!(
+                f,
+                "X results in rows without {UNITS_FIELD} are taken as Peak Area ({DETECTED_QUALITATIVELY}), without writing the units. Is that right?"
+            ),
+            Question::DetectedNotQuantified => write!(
+                f,
+                "Results between the {LOD_FIELD} and the {LOQ_FIELD}, and <LOQ, are characterised as \"{DETECTED_NOT_QUANTIFIED}\", which the template's dropdown list does not have (it has \"detected semiquantitatively\"). Which should be used?"
+            ),
+        }
+    }
+}
+
+/// A row's units, read from its [`UNITS_FIELD`] cell, ignoring case and surrounding spaces
+#[derive(Debug, PartialEq)]
+enum Units {
+    NanogramsPerLitre,
+    PeakArea,
+    Items,
+    Missing,
+    /// As written, trimmed
+    Other(String),
+}
+
+impl Units {
+    fn parse(cell: Option<&Data>) -> Self {
+        let Some(text) = cell.filter(|cell| !is_blank(cell)).map(ToString::to_string) else {
+            return Units::Missing;
+        };
+        let text = text.trim();
+        match text.to_lowercase().as_str() {
+            "ng/l" => Units::NanogramsPerLitre,
+            "peak area" => Units::PeakArea,
+            "items" => Units::Items,
+            _ => Units::Other(text.to_string()),
+        }
+    }
+}
+
+/// A sample cell's result, after the markers are read
+enum SampleResult<'a> {
+    Number(f64),
+    /// One of the values markers, uppercase
+    Marker(&'a str),
+}
+
+/// What becomes of a result
+#[derive(Debug, PartialEq)]
+enum Outcome {
+    /// A row, with this detection characterisation, why, and the question it raises, if any
+    Characterised {
+        detection: &'static str,
+        reason: String,
+        question: Option<Question>,
+    },
+    /// No row, until the question is answered
+    Open(Question),
+    /// The run stops until the source is corrected, for this reason
+    Refused(String),
+}
+
+/// The detection characterisation of `result`, in a row with `units` and limits `lod`, `loq`;
+/// `raw` is the cell as written, for messages
+fn characterise(
+    units: &Units,
+    result: &SampleResult,
+    raw: &str,
+    lod: Option<f64>,
+    loq: Option<f64>,
+) -> Outcome {
+    let characterised = |detection: &'static str, reason: String| Outcome::Characterised {
+        detection,
+        reason,
+        question: (detection == DETECTED_NOT_QUANTIFIED).then_some(Question::DetectedNotQuantified),
+    };
+    let unclassified = |units: Option<String>| {
+        Outcome::Open(Question::UnclassifiedResult {
+            result: match result {
+                SampleResult::Number(_) => "a number".to_string(),
+                SampleResult::Marker(marker) => format!("\"{marker}\""),
+            },
+            units,
+        })
+    };
+    match units {
+        Units::NanogramsPerLitre => {
+            if matches!(result, SampleResult::Marker(X_MARKER)) {
+                return Outcome::Refused(format!(
+                    "'{raw}' in an ng/L row: X is a Peak Area result, so correct the {UNITS_FIELD} or the result"
+                ));
+            }
+            let (Some(lod), Some(loq)) = (lod, loq) else {
+                return Outcome::Open(Question::MissingLimits);
+            };
+            match result {
+                SampleResult::Number(n) if *n >= loq => characterised(
+                    DETECTED_QUANTITATIVELY,
+                    format!("{n} is at least the {LOQ_FIELD} ({loq})"),
+                ),
+                SampleResult::Number(n) if *n >= lod => characterised(
+                    DETECTED_NOT_QUANTIFIED,
+                    format!("{n} is between the {LOD_FIELD} ({lod}) and the {LOQ_FIELD} ({loq})"),
+                ),
+                SampleResult::Number(n) => characterised(
+                    NOT_DETECTED,
+                    format!("{n} is below the {LOD_FIELD} ({lod})"),
+                ),
+                SampleResult::Marker(LOD_MARKER) => {
+                    characterised(NOT_DETECTED, format!("the result is {LOD_MARKER}"))
+                }
+                SampleResult::Marker(LOQ_MARKER) => characterised(
+                    DETECTED_NOT_QUANTIFIED,
+                    format!("the result is {LOQ_MARKER}"),
+                ),
+                SampleResult::Marker(_) => unclassified(Some("ng/L".to_string())),
+            }
+        }
+        Units::PeakArea => match result {
+            SampleResult::Marker(X_MARKER) => {
+                characterised(DETECTED_QUALITATIVELY, "X in a Peak Area row".to_string())
+            }
+            SampleResult::Number(_) => Outcome::Open(Question::NumberInPeakArea),
+            SampleResult::Marker(_) => unclassified(Some("Peak Area".to_string())),
+        },
+        Units::Missing => match result {
+            SampleResult::Marker(X_MARKER) => Outcome::Characterised {
+                detection: DETECTED_QUALITATIVELY,
+                reason: Question::EmptyUnitsTakenAsPeakArea.reason(),
+                question: Some(Question::EmptyUnitsTakenAsPeakArea),
+            },
+            _ => unclassified(None),
+        },
+        Units::Items => match result {
+            SampleResult::Number(n) if *n >= 0.0 && n.fract() == 0.0 => {
+                characterised(DETECTED_QUANTITATIVELY, "a count of items".to_string())
+            }
+            _ => Outcome::Refused(format!("'{raw}' is not a whole number of items")),
+        },
+        Units::Other(units) => Outcome::Open(Question::OtherUnits(units.clone())),
+    }
+}
+
+/// `field` of `row` as a finite number, whether the cell held a number or text
+fn number_in(row: &Map<String, Value>, field: &str) -> Option<f64> {
+    row.get(field).and_then(number_of)
+}
+
+/// `value` as a finite number, whether it is a number or text holding one
+fn number_of(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+    .filter(|n| n.is_finite())
+}
+
+/// The field holding a result's units. An unpivoted sheet must have it among its kept columns.
+pub const UNITS_FIELD: &str = "Concentration units";
+/// The field each result's detection characterisation is written to
+pub const DETECTION_FIELD: &str = "Detection characterisation";
+/// The field holding the row's limit of detection
+pub const LOD_FIELD: &str = "Limit of detection";
+/// The field holding the row's limit of quantification
+pub const LOQ_FIELD: &str = "Limit of quantification";
+
+const DETECTED_QUANTITATIVELY: &str = "detected quantitatively";
+const DETECTED_NOT_QUANTIFIED: &str = "detected, not quantified";
+const DETECTED_QUALITATIVELY: &str = "detected qualitatively";
+const NOT_DETECTED: &str = "not detected";
 
 /// Type alias for a parsed Excel row with row number and field data
 pub type ParsedExcelRow = (usize, Map<String, Value>);
@@ -122,6 +394,8 @@ struct ProcessedSheet {
     error_cells_summary: Option<String>,
     /// Every change made to a cell, in sheet order
     changes: Vec<Change>,
+    /// The open questions, each with the number of cells concerned
+    questions: Vec<(Question, usize)>,
     /// The markers allowed in the values field, when an unpivot sends its cells to a text field
     values_markers: Option<ValuesMarkers>,
 }
@@ -231,6 +505,7 @@ pub struct ExcelValidator {
     extra_columns_summary: Option<String>,
     error_cells_summary: Option<String>,
     changes: Vec<Change>,
+    questions: Vec<(Question, usize)>,
     values_markers: Option<ValuesMarkers>,
 }
 
@@ -311,10 +586,15 @@ pub const DEFAULT_MARKER_LIMITS: [&str; 2] =
 /// The markers analytical results use in place of a concentration:
 /// - `<LOD`: below the limit of detection (the substance was not detected)
 /// - `<LOQ`: below the limit of quantification (detected, but too little to measure)
+/// - `X`: detected, in a Peak Area row (or a row without units)
 ///
 /// The limits themselves are in their own columns ("Limit of detection", "Limit of
 /// quantification"), so the markers are kept as written rather than replaced by a number.
-pub const DEFAULT_VALUES_MARKERS: [&str; 2] = ["<LOD", "<LOQ"];
+pub const DEFAULT_VALUES_MARKERS: [&str; 3] = [LOD_MARKER, LOQ_MARKER, X_MARKER];
+
+const LOD_MARKER: &str = "<LOD";
+const LOQ_MARKER: &str = "<LOQ";
+const X_MARKER: &str = "X";
 
 /// A sample cell meaning no sample was taken at that station or depth. There is no result, so
 /// the cell gives no row, like a blank one. Matched ignoring case.
@@ -388,6 +668,10 @@ struct SampleColumns {
     values_markers: Option<ValuesMarkers>,
     /// Index of the kept column holding [`IDENTIFICATION_LEVEL_FIELD`]
     identification_level: usize,
+    /// Index of the kept column holding [`UNITS_FIELD`]
+    units: usize,
+    /// Whether the sheet has a [`DETECTION_FIELD`] column, which the characterisation replaces
+    detection_in_sheet: bool,
 }
 
 /// A values field that takes text, and the markers its cells may hold besides a number
@@ -429,12 +713,7 @@ impl ValuesMarkers {
                 .trim_start()
                 .strip_prefix(':')?
                 .trim();
-            let row_limit = match row.get(&limit.limit_field) {
-                Some(Value::Number(n)) => n.as_f64(),
-                Some(Value::String(s)) => s.trim().parse::<f64>().ok(),
-                _ => None,
-            }
-            .filter(|n| n.is_finite());
+            let row_limit = number_in(row, &limit.limit_field);
             let Some(row_limit) = row_limit else {
                 return Some(MarkerWithLimit::Refused(format!(
                     "'{}' has a number, but the row has no {}",
@@ -530,6 +809,7 @@ impl ExcelValidatorBuilder {
             extra_columns_summary: None,
             error_cells_summary: None,
             changes: Vec::new(),
+            questions: Vec::new(),
             values_markers: None,
         };
 
@@ -549,6 +829,7 @@ impl ExcelValidatorBuilder {
             extra_columns_summary: sheet.extra_columns_summary,
             error_cells_summary: sheet.error_cells_summary,
             changes: sheet.changes,
+            questions: sheet.questions,
             values_markers: sheet.values_markers,
         })
     }
@@ -580,6 +861,7 @@ impl ExcelValidator {
             extra_columns_summary: None,
             error_cells_summary: None,
             changes: Vec::new(),
+            questions: Vec::new(),
             values_markers: None,
         })
     }
@@ -607,6 +889,12 @@ impl ExcelValidator {
     /// its reason
     pub fn changes(&self) -> &[Change] {
         &self.changes
+    }
+
+    /// The open questions about the data, each with the number of cells concerned, in a fixed
+    /// order
+    pub fn questions(&self) -> &[(Question, usize)] {
+        &self.questions
     }
 
     /// Get the headers from the Excel file
@@ -987,6 +1275,10 @@ impl ExcelValidator {
         let mut no_sample_cells: usize = 0;
         // Rows with results whose identification level is not IDENTIFICATION_LEVEL
         let mut wrong_identification_levels: Vec<String> = Vec::new();
+        // Results that stop the run until the source is corrected
+        let mut refused_results: Vec<String> = Vec::new();
+        // The open questions, each with the number of cells concerned
+        let mut questions: BTreeMap<Question, usize> = BTreeMap::new();
         let mut parsed_rows: Vec<ParsedExcelRow> = Vec::new();
         // Every change made to a cell instead of taking it as written, in sheet order. Excel error
         // values (#VALUE!, #N/A, ...) are failed calculations, not data: each is read as a blank
@@ -1040,6 +1332,9 @@ impl ExcelValidator {
                                 unpivot_samples.values_column.clone(),
                             ])
                             .collect();
+                        if !unpivot_samples.detection_in_sheet {
+                            headers.push(DETECTION_FIELD.to_string());
+                        }
                         kept = unpivot_kept;
                         samples = Some(unpivot_samples);
                     }
@@ -1156,6 +1451,15 @@ impl ExcelValidator {
                         .map_or_else(|| "blank".to_string(), ToString::to_string)
                 )),
             }
+            let units = Units::parse(row.get(samples.units));
+            let lod = number_in(&json_obj, LOD_FIELD);
+            let loq = number_in(&json_obj, LOQ_FIELD);
+            let sheet_detection = json_obj
+                .get(DETECTION_FIELD)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|detection| !detection.is_empty())
+                .map(String::from);
             for (col_idx, header) in &samples.columns {
                 let Some(cell) = row.get(*col_idx).filter(|cell| !is_blank(cell)) else {
                     blank_sample_cells = blank_sample_cells.saturating_add(1);
@@ -1218,6 +1522,54 @@ impl ExcelValidator {
                         markers_without_limit = markers_without_limit.saturating_add(1);
                     }
                 }
+                // Text that is neither a number nor a marker is left for the validator to refuse
+                let result = match marker {
+                    Some((marker, _)) => Some(SampleResult::Marker(marker)),
+                    None => number_of(&value).map(SampleResult::Number),
+                };
+                if let Some(result) = result {
+                    let raw = cell.to_string();
+                    match characterise(&units, &result, raw.trim(), lod, loq) {
+                        Outcome::Characterised {
+                            detection,
+                            reason,
+                            question,
+                        } => {
+                            if let Some(question) = question {
+                                let count = questions.entry(question).or_insert(0);
+                                *count = count.saturating_add(1);
+                            }
+                            if let Some(was) =
+                                sheet_detection.as_deref().filter(|was| *was != detection)
+                            {
+                                changes.push(Change::Derived {
+                                    cell: sheet_cell(*col_idx),
+                                    field: DETECTION_FIELD.to_string(),
+                                    value: detection.to_string(),
+                                    was: was.to_string(),
+                                    reason,
+                                });
+                            }
+                            sample_obj.insert(
+                                DETECTION_FIELD.to_string(),
+                                Value::String(detection.to_string()),
+                            );
+                        }
+                        Outcome::Open(question) => {
+                            let count = questions.entry(question.clone()).or_insert(0);
+                            *count = count.saturating_add(1);
+                            changes.push(Change::Skipped {
+                                cell: sheet_cell(*col_idx),
+                                reason: SkipReason::Open(question),
+                            });
+                            continue;
+                        }
+                        Outcome::Refused(why) => {
+                            refused_results.push(format!("{}: {why}", sheet_cell(*col_idx)));
+                            continue;
+                        }
+                    }
+                }
                 sample_obj.insert(samples.values_column.clone(), value);
                 parsed_rows.push((row_number, sample_obj));
             }
@@ -1232,6 +1584,15 @@ impl ExcelValidator {
                     .into_values()
                     .collect::<Vec<_>>()
                     .join("\n  ")
+            ));
+        }
+
+        if !refused_results.is_empty() {
+            return Err(anyhow::anyhow!(
+                "The sheet \"{}\" has {} result(s) that cannot be imported. Correct these cells in the source file and try again:\n  {}",
+                self.sheet_name,
+                refused_results.len(),
+                refused_results.join("\n  ")
             ));
         }
 
@@ -1351,6 +1712,7 @@ impl ExcelValidator {
                 )
             }),
             changes,
+            questions: questions.into_iter().collect(),
             values_markers,
         })
     }
@@ -1523,6 +1885,25 @@ impl ExcelValidator {
             ));
         };
 
+        // Each result's detection characterisation is worked out from its row's units and limits
+        for field in [UNITS_FIELD, DETECTION_FIELD, LOD_FIELD, LOQ_FIELD] {
+            if !self.field_schemas.contains_key(field) {
+                return Err(anyhow::anyhow!(
+                    "Cannot unpivot the sheet \"{}\": the data dictionary has no field \"{}\", which analytical results need.",
+                    self.sheet_name,
+                    field
+                ));
+            }
+        }
+        let Some(&(units, _)) = kept.iter().find(|(_, name)| *name == UNITS_FIELD) else {
+            return Err(anyhow::anyhow!(
+                "Cannot unpivot the sheet \"{}\": it has no \"{}\" column before the sample columns. Each result is characterised by its row's units.",
+                self.sheet_name,
+                UNITS_FIELD
+            ));
+        };
+        let detection_in_sheet = kept.iter().any(|(_, name)| *name == DETECTION_FIELD);
+
         // A numeric field needs no markers: its type already refuses text
         let values_markers = self
             .field_schemas
@@ -1575,6 +1956,8 @@ impl ExcelValidator {
                 values_column,
                 values_markers,
                 identification_level,
+                units,
+                detection_in_sheet,
             },
         ))
     }

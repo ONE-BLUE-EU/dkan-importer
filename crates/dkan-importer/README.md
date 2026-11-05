@@ -56,7 +56,7 @@ cargo run -- --base-url https://dkan.example.com --excel-file ./data/sample-data
 - **`--unpivot`** (optional) - Unpivot the sheet: one row per sample cell. Requires `--headers-column`. See [Unpivoting a wide sheet](#unpivoting-a-wide-sheet)
 - **`--headers-column`** (with `--unpivot` only) - The data dictionary field that receives each sample column's header
 - **`--values-column`** (with `--unpivot` only) - The data dictionary field that receives each sample cell's value (defaults to "Concentration")
-- **`--values-markers`** (with `--unpivot` only) - The text a sample cell may hold instead of a number when the values column is a text field (defaults to `<LOD` `<LOQ`). See [Markers instead of numbers](#markers-instead-of-numbers)
+- **`--values-markers`** (with `--unpivot` only) - The text a sample cell may hold instead of a number when the values column is a text field (defaults to `<LOD` `<LOQ` `X`). See [Markers instead of numbers](#markers-instead-of-numbers)
 - **`--marker-limits`** (with `--unpivot` only) - The markers that may be followed by their limit, as `MARKER=FIELD` (defaults to `"<LOD=Limit of detection"` `"<LOQ=Limit of quantification"`). See [A marker followed by its limit](#a-marker-followed-by-its-limit)
 - **`--extra-columns-to [FIELD]`** (optional, not with `--unpivot`) - Move the columns that are not data dictionary fields into FIELD as JSON instead of refusing them (FIELD defaults to "Remark 1"). See [Keeping extra columns](#keeping-extra-columns)
 
@@ -98,7 +98,7 @@ Okadaic acid   | ST02_Surface | 0.40
 
 #### Markers instead of numbers
 
-Some results are not numbers: `<LOD` (below the limit of detection) or `<LOQ` (below the limit of quantification). The limits themselves are in their own columns, so these markers are kept as written. That needs a values column that is a text field (`string`) in the data dictionary. A number field refuses them as type mismatches.
+Some results are not numbers: `<LOD` (below the limit of detection), `<LOQ` (below the limit of quantification) or `X` (detected, in a Peak Area row). The limits themselves are in their own columns, so these markers are kept as written. That needs a values column that is a text field (`string`) in the data dictionary. A number field refuses them as type mismatches.
 
 A text field would accept any text, so the importer checks every non-blank sample cell: it must be a number or one of the `--values-markers`. Anything else, such as `<LDO` or `n.d.`, is a validation error at its source row:
 
@@ -106,13 +106,13 @@ A text field would accept any text, so the importer checks every non-blank sampl
 Invalid format at row[2]./Concentration: '<LDO' is not a number or one of the markers <LOD, <LOQ
 ```
 
-- The default markers are `<LOD` and `<LOQ`. Giving `--values-markers` replaces them, so list all of them: `--values-markers "<LOD" "<LOQ" "<MDL"`.
+- The default markers are `<LOD`, `<LOQ` and `X`. Giving `--values-markers` replaces them, so list all of them: `--values-markers "<LOD" "<LOQ" "X" "<MDL"`. A marker other than these three has no detection characterisation yet, so its cells give no row and a question in the run log.
 - `NS` (no sample) is no result, so a sample cell holding it gives no row, with any values field, like a blank cell. `ND` is treated the same as `NS`. The summary line counts them: `...: 518 row(s); 12 NS or ND (no sample) cell(s) skipped.`, and the run log lists each one. For the same reason neither can be one of the `--values-markers`.
 - `<LQ` and `NQ` are refused, even when given in `--values-markers`: they map to `<LOQ`, so change them in the source file, for consistency. A sample cell with either (any case, also with a limit, as in `<LQ:0.25`) is a validation error saying so: `'<LQ' is not allowed: <LQ maps to <LOQ. Change it to <LOQ in the source file, for consistency.`
 - Markers match ignoring case and are written uppercase, so `<lod` is uploaded as `<LOD`, also when given in `--values-markers` or `--marker-limits`. Spaces around a cell's text are ignored, so `<LOQ ` is `<LOQ`.
 - Numbers are uploaded as Excel stores them (`0.880999866251062`).
 - With a number field the markers are not used, because the field already refuses all text.
-- The summary line ends with the rule, for example `... 518 row(s). Concentration takes numbers or <LOD, <LOQ.`
+- The summary line ends with the rule, for example `... 518 row(s). Concentration takes numbers or <LOD, <LOQ, X.`
 
 #### A marker followed by its limit
 
@@ -127,7 +127,24 @@ Invalid format at row[3]./Concentration: '<LOQ:0.25' has a number, but the row h
 
 - The default limits are `"<LOD=Limit of detection"` and `"<LOQ=Limit of quantification"`. Giving `--marker-limits` replaces them. A marker without a limit takes no number.
 - A limit for a marker that is not one of the `--values-markers` does not apply. Its field must be a data dictionary field, or the run stops before reading any rows.
-- The summary line counts the cells written as the marker alone, for example `... Concentration takes numbers or <LOD, <LOQ. 375 value(s) written as their marker alone, the number after it being the row's limit: <LOD (Limit of detection), <LOQ (Limit of quantification).`
+- The summary line counts the cells written as the marker alone, for example `... Concentration takes numbers or <LOD, <LOQ, X. 375 value(s) written as their marker alone, the number after it being the row's limit: <LOD (Limit of detection), <LOQ (Limit of quantification).`
+
+#### Detection characterisation
+
+Each result's "Detection characterisation" is worked out from its row's "Concentration units" (matched ignoring case and spaces) and limits, replacing the sheet's own value, which describes the whole substance row rather than each result. The data dictionary must have "Concentration units", "Detection characterisation", "Limit of detection" and "Limit of quantification", and the sheet a "Concentration units" column before the sample columns; otherwise the run stops before reading any rows. If the sheet has no "Detection characterisation" column, one is added.
+
+| Units | Result | Detection characterisation |
+| ----- | ------ | -------------------------- |
+| ng/L | a number at least the limit of quantification | detected quantitatively |
+| ng/L | a number from the limit of detection up to the limit of quantification, or `<LOQ` | detected, not quantified |
+| ng/L | a number below the limit of detection, or `<LOD` | not detected |
+| Peak Area | `X` | detected qualitatively |
+| none | `X` | detected qualitatively (taken as Peak Area; the units stay empty) |
+| items | a whole number, 0 or more | detected quantitatively |
+
+- Where the result's characterisation differs from the sheet's own, the run log says so, with the reason: `row 2, column AQ "24019033": Detection characterisation "detected, not quantified" instead of "detected quantitatively": the result is <LOQ`.
+- These stop the run before anything is written or uploaded, listing each cell to correct in the source file: `X` in an ng/L row (X is a Peak Area result), and an items result that is not a whole number of 0 or more.
+- What is not clear yet is not imported: the cell gives no row, the run log lists it, and asks the data owners one question per kind of case, with the number of cells. The importer prints how many questions there are. These are: an ng/L row without both limits, a number in a Peak Area row, other units (such as ng/mL), any other result without units or with a marker that has no characterisation. "detected, not quantified" is also asked about, as the template's dropdown list has "detected semiquantitatively" instead.
 
 ### Keeping extra columns
 

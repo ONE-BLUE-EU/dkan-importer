@@ -6,7 +6,7 @@
 use clap::Parser;
 use dkan_importer::{
     model::DataDictionary,
-    run_log::{RunLog, run_log_filename},
+    run_log::{RunLog, changes_lines, questions_lines, run_log_filename},
     utils::{
         check_upload_login, dataset_add_distribution, delete_remote_file, generate_unique_filename,
         upload_distribution_csv_file,
@@ -112,8 +112,8 @@ struct Args {
     /// column is a text field. Only with --unpivot.
     ///
     /// Analytical results do not always have a number: a substance can be
-    /// below the limit of detection (<LOD) or of quantification (<LOQ).
-    /// Keeping these as written needs a values column
+    /// below the limit of detection (<LOD) or of quantification (<LOQ), or
+    /// detected in a Peak Area row (X). Keeping these as written needs a values column
     /// that takes text, but a text field accepts anything, so a typo such as
     /// "<LDO" or "n.d." would be uploaded as data. With this option, each
     /// non-blank sample cell must be a number or one of these markers (ignoring
@@ -288,7 +288,17 @@ fn run(arguments: Args, log: &mut RunLog) -> Result<(), Box<dyn std::error::Erro
     if let Some(summary) = validator.extra_columns_summary() {
         log.info(&format!("✅ {summary}"))?;
     }
-    log.changes(validator.changes())?;
+    log.notes(&changes_lines(validator.changes()))?;
+    let questions = validator.questions();
+    if !questions.is_empty() {
+        let cells: usize = questions.iter().map(|(_, cells)| cells).sum();
+        log.info(&format!(
+            "❓ {} question(s) about the data, concerning {} cell(s) not imported or imported on an assumption: see the run log",
+            questions.len(),
+            cells
+        ))?;
+        log.notes(&questions_lines(questions))?;
+    }
     // The error says whether the details are in the error log or in the message itself
     validator.validate_excel()?;
     log.info("✅ Validation completed!")?;

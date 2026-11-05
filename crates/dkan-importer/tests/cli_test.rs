@@ -243,7 +243,7 @@ fn help_groups_the_unpivot_flags_with_their_default_and_an_example() {
         unpivot_section.contains("--values-markers <MARKER>..."),
         "{help}"
     );
-    assert!(unpivot_section.contains("[default: <LOD <LOQ]"), "{help}");
+    assert!(unpivot_section.contains("[default: <LOD <LOQ X]"), "{help}");
     assert!(
         unpivot_section.contains("--marker-limits <MARKER=FIELD>..."),
         "{help}"
