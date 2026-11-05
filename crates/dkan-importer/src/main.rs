@@ -6,6 +6,7 @@
 use clap::Parser;
 use dkan_importer::{
     model::DataDictionary,
+    run_log::{RunLog, run_log_filename},
     utils::{
         check_upload_login, dataset_add_distribution, delete_remote_file, generate_unique_filename,
         upload_distribution_csv_file,
@@ -17,6 +18,7 @@ use excel_core::{
     parse_values_marker,
 };
 use rpassword::prompt_password;
+use std::process::ExitCode;
 
 #[derive(Parser)]
 #[command(name = "dkan-importer")]
@@ -201,8 +203,37 @@ struct Args {
     extra_columns_to: Option<String>,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> ExitCode {
     let arguments = Args::parse();
+    let log_path = run_log_filename(&arguments.dataset_id, &arguments.sheet_name);
+    let mut log = match RunLog::create(&log_path) {
+        Ok(log) => log,
+        Err(e) => {
+            eprintln!("❌ Cannot write the run log \"{log_path}\": {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match run(arguments, &mut log) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            if let Err(log_error) = log.error(&format!("❌ {e}")) {
+                eprintln!("❌ Cannot write the run log \"{log_path}\": {log_error}");
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The import itself. Everything it prints also goes to `log`; the password never does.
+fn run(arguments: Args, log: &mut RunLog) -> Result<(), Box<dyn std::error::Error>> {
+    log.note(&format!("Excel file: {}", arguments.excel_file))?;
+    log.note(&format!("Sheet: {}", arguments.sheet_name))?;
+    log.note(&format!("Dataset: {}", arguments.dataset_id))?;
+    log.note(&format!(
+        "Data dictionary: {}",
+        arguments.data_dictionary_id
+    ))?;
+    log.note(&format!("DKAN: {}", arguments.base_url))?;
 
     // Validate the url before asking for anything. It must be https because we are using basic auth.
     if !arguments.base_url.starts_with("https://") {
@@ -221,7 +252,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::new();
     // A bad login must stop the run before anything is written
     check_upload_login(&arguments.base_url, &arguments.username, &password, &client)?;
-    println!("✅ Login accepted for user \"{}\"", arguments.username);
+    log.info(&format!(
+        "✅ Login accepted for user \"{}\"",
+        arguments.username
+    ))?;
     let data_dictionary =
         DataDictionary::new(&arguments.base_url, &arguments.data_dictionary_id, &client)?;
     let json_schema = data_dictionary.to_json_schema()?;
@@ -246,27 +280,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut validator = builder.build()?;
     if let Some(summary) = validator.error_cells_summary() {
-        println!("⚠️  {summary}");
+        log.info(&format!("⚠️  {summary}"))?;
     }
     if let Some(summary) = validator.unpivot_summary() {
-        println!("✅ {summary}");
+        log.info(&format!("✅ {summary}"))?;
     }
     if let Some(summary) = validator.extra_columns_summary() {
-        println!("✅ {summary}");
+        log.info(&format!("✅ {summary}"))?;
     }
-    if let Err(e) = validator.validate_excel() {
-        // The error says whether the details are in the error log or in the message itself
-        eprintln!("❌ {e}");
-        std::process::exit(1);
-    }
-    println!("✅ Validation completed!");
+    log.changes(validator.changes())?;
+    // The error says whether the details are in the error log or in the message itself
+    validator.validate_excel()?;
+    log.info("✅ Validation completed!")?;
 
     let csv_filename = generate_unique_filename(&arguments.dataset_id, &arguments.sheet_name);
     // Create a csv since the validation is successful. Use schema-aware parsing for proper date formatting.
     validator
         .export_to_csv(&csv_filename, title_to_name_mapping)
-        .map_err(|e| format!("❌ Failed to create CSV with error: {e}"))?;
-    println!("✅ CSV file created: {csv_filename}");
+        .map_err(|e| format!("Failed to create CSV with error: {e}"))?;
+    log.info(&format!("✅ CSV file created: {csv_filename}"))?;
 
     let file_url = upload_distribution_csv_file(
         &arguments.base_url,
@@ -276,7 +308,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &client,
     )?;
 
-    let optional_previous_csv_filename = dataset_add_distribution(
+    let added = dataset_add_distribution(
         &arguments.base_url,
         &arguments.dataset_id,
         &csv_filename,
@@ -286,9 +318,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &password,
         &client,
     )?;
+    match &added.previous_csv_filename {
+        Some(previous) => log.info(&format!(
+            "✅ Successfully replaced CSV distribution '{}' with '{}' in dataset \"{}\" with id \"{}\"",
+            previous, csv_filename, added.dataset_title, arguments.dataset_id
+        ))?,
+        None => log.info(&format!(
+            "✅ Successfully added CSV distribution '{}' to dataset \"{}\" with id \"{}\"",
+            csv_filename, added.dataset_title, arguments.dataset_id
+        ))?,
+    }
 
     // Clean up previous CSV file if one was replaced
-    if let Some(previous_csv_filename) = optional_previous_csv_filename {
+    if let Some(previous_csv_filename) = added.previous_csv_filename {
         delete_remote_file(
             &arguments.base_url,
             &previous_csv_filename,
@@ -296,6 +338,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &password,
             &client,
         )?;
+        log.info(&format!(
+            "🧹 Previous CSV file successfully deleted: {previous_csv_filename}"
+        ))?;
     }
 
     // Also delete the CSV file from the local filesystem

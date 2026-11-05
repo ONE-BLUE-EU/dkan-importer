@@ -23,6 +23,81 @@ const INTEGER_PLACEHOLDER: &str = "0";
 /// Number of columns in an Excel sheet (A to XFD).
 const EXCEL_MAX_COLUMNS: u32 = 16_384;
 
+/// A cell of the sheet, as Excel shows it
+#[derive(Debug, Clone, PartialEq)]
+pub struct SheetCell {
+    /// The row number Excel shows
+    pub row: usize,
+    /// The column letters Excel shows, as `L`
+    pub column: String,
+    /// The column's header, unless it has none
+    pub header: Option<String>,
+}
+
+impl std::fmt::Display for SheetCell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "row {}, column {}", self.row, self.column)?;
+        match &self.header {
+            Some(header) => write!(f, " \"{header}\""),
+            None => Ok(()),
+        }
+    }
+}
+
+/// What the importer did to a cell instead of taking it as written, and why. Listed in the run
+/// log, so the data can be checked and corrected at its source.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Change {
+    /// An Excel error value, read as a blank cell
+    Emptied { cell: SheetCell, error: String },
+    /// A sample cell that gives no row
+    Skipped { cell: SheetCell, reason: SkipReason },
+    /// A value written differently from the source
+    Rewritten {
+        cell: SheetCell,
+        was: String,
+        now: String,
+        reason: String,
+    },
+}
+
+/// Why a sample cell gives no row
+#[derive(Debug, Clone, PartialEq)]
+pub enum SkipReason {
+    /// Blank: no result
+    Blank,
+    /// No sample was taken; the cell's text as written, trimmed
+    NoSample(String),
+}
+
+impl std::fmt::Display for Change {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Change::Emptied { cell, error } => write!(
+                f,
+                "{cell}: emptied: Excel error {error}, a failed calculation, read as a blank cell"
+            ),
+            Change::Skipped {
+                cell,
+                reason: SkipReason::Blank,
+            } => write!(f, "{cell}: no row: blank cell, no result"),
+            Change::Skipped {
+                cell,
+                reason: SkipReason::NoSample(text),
+            } => write!(f, "{cell}: no row: \"{text}\" means no sample"),
+            Change::Rewritten {
+                cell,
+                was,
+                now,
+                reason,
+            } => write!(
+                f,
+                "{cell}: written as \"{now}\" instead of \"{was}\": {reason}"
+            ),
+        }
+    }
+}
+
 /// Type alias for a parsed Excel row with row number and field data
 pub type ParsedExcelRow = (usize, Map<String, Value>);
 
@@ -36,6 +111,8 @@ struct ProcessedSheet {
     extra_columns_summary: Option<String>,
     /// The Excel error cells emptied, when there were any
     error_cells_summary: Option<String>,
+    /// Every change made to a cell, in sheet order
+    changes: Vec<Change>,
     /// The markers allowed in the values field, when an unpivot sends its cells to a text field
     values_markers: Option<ValuesMarkers>,
 }
@@ -144,6 +221,7 @@ pub struct ExcelValidator {
     unpivot_summary: Option<String>,
     extra_columns_summary: Option<String>,
     error_cells_summary: Option<String>,
+    changes: Vec<Change>,
     values_markers: Option<ValuesMarkers>,
 }
 
@@ -308,7 +386,7 @@ struct ValuesMarkers {
 /// What a cell made of a marker and a number is; see [`Unpivot::marker_limits`]
 enum MarkerWithLimit<'a> {
     /// The number is the row's limit: write the marker alone
-    Matches(&'a str),
+    Matches(&'a MarkerLimit),
     /// Why the number is refused
     Refused(String),
 }
@@ -350,7 +428,7 @@ impl ValuesMarkers {
                 .parse::<f64>()
                 .is_ok_and(|n| (n - row_limit).abs() <= 1e-9 * n.abs().max(row_limit.abs()));
             Some(if matches {
-                MarkerWithLimit::Matches(limit.marker.as_str())
+                MarkerWithLimit::Matches(limit)
             } else {
                 MarkerWithLimit::Refused(format!(
                     "'{}' does not end with the row's {} ({}); write '{}' or '{}:{}'",
@@ -434,6 +512,7 @@ impl ExcelValidatorBuilder {
             unpivot_summary: None,
             extra_columns_summary: None,
             error_cells_summary: None,
+            changes: Vec::new(),
             values_markers: None,
         };
 
@@ -452,6 +531,7 @@ impl ExcelValidatorBuilder {
             unpivot_summary: sheet.unpivot_summary,
             extra_columns_summary: sheet.extra_columns_summary,
             error_cells_summary: sheet.error_cells_summary,
+            changes: sheet.changes,
             values_markers: sheet.values_markers,
         })
     }
@@ -482,6 +562,7 @@ impl ExcelValidator {
             unpivot_summary: None,
             extra_columns_summary: None,
             error_cells_summary: None,
+            changes: Vec::new(),
             values_markers: None,
         })
     }
@@ -503,6 +584,12 @@ impl ExcelValidator {
     /// it carries no data.
     pub fn error_cells_summary(&self) -> Option<&str> {
         self.error_cells_summary.as_deref()
+    }
+
+    /// Every change made to a cell instead of taking it as written, in sheet order, each with
+    /// its reason
+    pub fn changes(&self) -> &[Change] {
+        &self.changes
     }
 
     /// Get the headers from the Excel file
@@ -884,9 +971,10 @@ impl ExcelValidator {
         // Rows with results whose identification level is not IDENTIFICATION_LEVEL
         let mut wrong_identification_levels: Vec<String> = Vec::new();
         let mut parsed_rows: Vec<ParsedExcelRow> = Vec::new();
-        // Excel error values (#VALUE!, #N/A, ...) are failed calculations, not data: each is read
-        // as a blank cell and listed
-        let mut error_cells: Vec<String> = Vec::new();
+        // Every change made to a cell instead of taking it as written, in sheet order. Excel error
+        // values (#VALUE!, #N/A, ...) are failed calculations, not data: each is read as a blank
+        // cell and listed here.
+        let mut changes: Vec<Change> = Vec::new();
         // Data in a column without a header has no field to go to: the first value of each such
         // column, by column index
         let mut unnamed_columns_with_data: BTreeMap<usize, String> = BTreeMap::new();
@@ -949,24 +1037,22 @@ impl ExcelValidator {
                 .saturating_add(row_index)
                 .saturating_add(1);
 
+            let sheet_cell = |col_idx: usize| SheetCell {
+                row: row_number,
+                column: column_name(sheet_column(first_col, col_idx)),
+                header: columns.get(col_idx).cloned().flatten(),
+            };
+
             let row: Cow<[Data]> = if row.iter().any(|cell| matches!(cell, Data::Error(_))) {
                 Cow::Owned(
                     row.iter()
                         .enumerate()
                         .map(|(col_idx, cell)| match cell {
                             Data::Error(e) => {
-                                let header = columns
-                                    .get(col_idx)
-                                    .and_then(Option::as_deref)
-                                    .map(|header| format!(" \"{header}\""))
-                                    .unwrap_or_default();
-                                error_cells.push(format!(
-                                    "row {}, column {}{}: {}",
-                                    row_number,
-                                    column_name(sheet_column(first_col, col_idx)),
-                                    header,
-                                    e
-                                ));
+                                changes.push(Change::Emptied {
+                                    cell: sheet_cell(col_idx),
+                                    error: e.to_string(),
+                                });
                                 Data::Empty
                             }
                             cell => cell.clone(),
@@ -1056,10 +1142,18 @@ impl ExcelValidator {
             for (col_idx, header) in &samples.columns {
                 let Some(cell) = row.get(*col_idx).filter(|cell| !is_blank(cell)) else {
                     blank_sample_cells = blank_sample_cells.saturating_add(1);
+                    changes.push(Change::Skipped {
+                        cell: sheet_cell(*col_idx),
+                        reason: SkipReason::Blank,
+                    });
                     continue;
                 };
                 if is_no_result(cell) {
                     no_sample_cells = no_sample_cells.saturating_add(1);
+                    changes.push(Change::Skipped {
+                        cell: sheet_cell(*col_idx),
+                        reason: SkipReason::NoSample(cell.to_string().trim().to_string()),
+                    });
                     continue;
                 }
                 let mut sample_obj = json_obj.clone();
@@ -1075,16 +1169,35 @@ impl ExcelValidator {
                 let marker = samples.values_markers.as_ref().and_then(|values| {
                     let s = value.as_str()?;
                     match values.marker(s) {
-                        Some(marker) => Some((marker, false)),
+                        Some(marker) => Some((marker, None)),
                         None => match values.marker_with_limit(s, &json_obj)? {
-                            MarkerWithLimit::Matches(marker) => Some((marker, true)),
+                            MarkerWithLimit::Matches(limit) => {
+                                Some((limit.marker.as_str(), Some(limit.limit_field.as_str())))
+                            }
                             MarkerWithLimit::Refused(_) => None,
                         },
                     }
                 });
-                if let Some((marker, had_limit)) = marker {
+                if let Some((marker, limit_field)) = marker {
+                    // Spaces around a cell's text are trimmed from every cell, so they are no
+                    // change of their own
+                    let was = cell.to_string().trim().to_string();
+                    if was != marker {
+                        let reason = match limit_field {
+                            Some(field) => {
+                                format!("the number after the marker is the row's {field}")
+                            }
+                            None => "markers are written uppercase".to_string(),
+                        };
+                        changes.push(Change::Rewritten {
+                            cell: sheet_cell(*col_idx),
+                            was,
+                            now: marker.to_string(),
+                            reason,
+                        });
+                    }
                     value = Value::String(marker.to_string());
-                    if had_limit {
+                    if limit_field.is_some() {
                         markers_without_limit = markers_without_limit.saturating_add(1);
                     }
                 }
@@ -1200,6 +1313,14 @@ impl ExcelValidator {
             )
         });
 
+        let error_cells: Vec<String> = changes
+            .iter()
+            .filter_map(|change| match change {
+                Change::Emptied { cell, error } => Some(format!("{cell}: {error}")),
+                _ => None,
+            })
+            .collect();
+
         Ok(ProcessedSheet {
             headers,
             rows: parsed_rows,
@@ -1212,6 +1333,7 @@ impl ExcelValidator {
                     error_cells.join("\n  ")
                 )
             }),
+            changes,
             values_markers,
         })
     }

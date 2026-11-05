@@ -18,9 +18,9 @@ pub mod writers;
 pub mod test_utils;
 
 pub use excel_validator::{
-    DEFAULT_MARKER_LIMITS, DEFAULT_VALUES_MARKERS, ExcelValidator, ExcelValidatorBuilder,
+    Change, DEFAULT_MARKER_LIMITS, DEFAULT_VALUES_MARKERS, ExcelValidator, ExcelValidatorBuilder,
     FieldSchema, IDENTIFICATION_LEVEL, IDENTIFICATION_LEVEL_FIELD, MarkerLimit, SchemaType,
-    Unpivot, parse_values_marker,
+    SheetCell, SkipReason, Unpivot, parse_values_marker,
 };
 
 pub const ERRORS_LOG_FILE: &str = "errors.log";

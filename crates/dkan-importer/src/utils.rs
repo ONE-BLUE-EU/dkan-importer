@@ -127,6 +127,13 @@ pub fn upload_distribution_csv_file(
     }
 }
 
+/// A CSV distribution added to a dataset
+pub struct DistributionAdded {
+    pub dataset_title: String,
+    /// The CSV distribution it replaced, if any
+    pub previous_csv_filename: Option<String>,
+}
+
 pub fn dataset_add_distribution(
     url: &str,
     dataset_id: &str,
@@ -136,7 +143,7 @@ pub fn dataset_add_distribution(
     username: &str,
     password: &str,
     client: &Client,
-) -> Result<Option<String>, anyhow::Error> {
+) -> Result<DistributionAdded, anyhow::Error> {
     // Step 1: Get the current dataset to ensure it exists and get its current state
     let endpoint_url = format!("{url}/api/1/metastore/schemas/dataset/items/{dataset_id}");
     let get_response = client
@@ -219,18 +226,10 @@ pub fn dataset_add_distribution(
         .send()?;
 
     if patch_response.status().is_success() {
-        if let Some(ref prev_filename) = previous_csv_filename {
-            println!(
-                "✅ Successfully replaced CSV distribution '{}' with '{}' in dataset \"{}\" with id \"{}\"",
-                prev_filename, file_name, dataset_title, dataset_id
-            );
-        } else {
-            println!(
-                "✅ Successfully added CSV distribution '{}' to dataset \"{}\" with id \"{}\"",
-                file_name, dataset_title, dataset_id
-            );
-        }
-        Ok(previous_csv_filename)
+        Ok(DistributionAdded {
+            dataset_title,
+            previous_csv_filename,
+        })
     } else {
         let error_text = patch_response.text()?;
         Err(anyhow::anyhow!(
@@ -262,7 +261,6 @@ pub fn delete_remote_file(
             "Failed to delete file {file_name}: {error_text}"
         ));
     }
-    println!("🧹 Previous CSV file successfully deleted: {file_name}");
     return Ok(());
 }
 

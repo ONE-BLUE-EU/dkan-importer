@@ -5,3 +5,4 @@ data
 json-schema
 tmp.txt
 *.csv
+*.run.log

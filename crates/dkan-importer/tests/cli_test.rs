@@ -2,7 +2,12 @@
 //! nothing reaches a real host.
 
 use std::net::TcpListener;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// The password every run is given; it must never reach the run log.
+const PASSWORD: &str = "pw-never-logged-7f3a";
 
 /// An https URL on a local port nothing listens on.
 fn closed_https_url() -> String {
@@ -10,10 +15,30 @@ fn closed_https_url() -> String {
     format!("https://{}", listener.local_addr().unwrap())
 }
 
-/// Run dkan-importer with the required arguments followed by `extra`.
+/// A new empty directory for one run, so that what it writes stays out of the repository and
+/// away from other tests.
+fn new_run_dir(name: &str) -> PathBuf {
+    let dir =
+        std::env::temp_dir().join(format!("dkan-importer-cli-{}-{}", name, std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// Run dkan-importer with the required arguments followed by `extra`, in a directory of its own.
 fn run(extra: &[&str]) -> Output {
+    static RUNS: AtomicUsize = AtomicUsize::new(0);
+    let dir = new_run_dir(&format!("run-{}", RUNS.fetch_add(1, Ordering::Relaxed)));
+    let output = run_in(&dir, extra);
+    let _ = std::fs::remove_dir_all(&dir);
+    output
+}
+
+/// Run dkan-importer with the required arguments followed by `extra`, in `dir`.
+fn run_in(dir: &Path, extra: &[&str]) -> Output {
     let base_url = closed_https_url();
     Command::new(env!("CARGO_BIN_EXE_dkan-importer"))
+        .current_dir(dir)
         .args([
             "--base-url",
             &base_url,
@@ -24,7 +49,7 @@ fn run(extra: &[&str]) -> Output {
             "--username",
             "user",
             "--password",
-            "password",
+            PASSWORD,
             "--dataset-id",
             "some-dataset",
         ])
@@ -275,4 +300,44 @@ fn help_shows_extra_columns_to_with_its_default_field() {
         help.contains("[default when given alone: Remark 1]"),
         "{help}"
     );
+}
+
+/// A run that fails still leaves its log, with what it was given and why it stopped, but never
+/// the password.
+#[test]
+fn a_failed_run_leaves_a_run_log_with_the_error_and_without_the_password() {
+    let dir = new_run_dir("run-log-failed");
+
+    let output = run_in(&dir, &["--sheet-name", "Analytical results (I)"]);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let expected_exit_code = Some(1);
+    assert_eq!(output.status.code(), expected_exit_code, "{stderr}");
+    let log_path = dir.join("some-dataset_analytical_results_(i).run.log");
+    let log = std::fs::read_to_string(&log_path)
+        .unwrap_or_else(|e| panic!("no run log at {}: {e}", log_path.display()));
+    assert!(log.contains("Excel file: unused.xlsx\n"), "{log}");
+    assert!(log.contains("Sheet: Analytical results (I)\n"), "{log}");
+    let error_line = stderr
+        .lines()
+        .find(|line| line.starts_with("❌") && line.contains("/api/importer/upload"))
+        .unwrap_or_else(|| panic!("no error line in:\n{stderr}"));
+    assert!(log.contains(error_line), "{error_line}\n{log}");
+    assert!(!log.contains(PASSWORD), "{log}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The run log always describes the latest run of a dataset and sheet.
+#[test]
+fn each_run_replaces_the_run_log_of_the_last_one() {
+    let dir = new_run_dir("run-log-replaced");
+    let log_path = dir.join("some-dataset_sheet1.run.log");
+    std::fs::write(&log_path, "from an earlier run\n").unwrap();
+
+    run_in(&dir, &[]);
+
+    let log = std::fs::read_to_string(&log_path).unwrap();
+    assert!(!log.contains("from an earlier run"), "{log}");
+    assert!(log.contains("Sheet: Sheet1\n"), "{log}");
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -218,6 +218,22 @@ Example Excel structure:
 - Real-time validation results
 - Upload progress and success confirmation
 
+### Run Log File
+Every run writes `<dataset>_<sheet>.run.log` in the current directory (the sheet name lowercase, with its spaces as `_`, as in `some-dataset_analytical_results_(i).run.log`). Each run replaces the log of the last run of that dataset and sheet, so it always describes the latest one. It is written even when the run stops, and never contains the password. It holds:
+- What the run was given: the Excel file, sheet, dataset, data dictionary and DKAN URL
+- Every line the run printed, including the error that stopped it
+- Every change made to a cell instead of taking it as written, one line per cell with its reason, so the data can be checked and corrected at its source:
+
+```
+6 cell change(s), each with its reason:
+  row 2, column E "ST01": written as "<LOQ" instead of "<loq:0.25": the number after the marker is the row's Limit of quantification
+  row 2, column F "ST02": no row: "ns" means no sample
+  row 2, column G "ST03": no row: blank cell, no result
+  row 3, column E "ST01": emptied: Excel error #VALUE!, a failed calculation, read as a blank cell
+```
+
+Rows that fail validation are not changes: they are listed in `errors.log`.
+
 ### Error Log File
 The application creates an `errors.log` file containing:
 - Timestamp of validation run

@@ -59,6 +59,8 @@ struct Unpivoted {
     summary: String,
     /// What the validator reports about the Excel error cells it emptied
     error_cells: Option<String>,
+    /// Every change the validator made to a cell, with its reason, as the run log shows it
+    changes: Vec<String>,
     csv_lines: Vec<String>,
 }
 
@@ -87,6 +89,11 @@ fn run_with_schema(
             .ok_or("an unpivoted sheet must have a summary")?
             .to_string();
         let error_cells = validator.error_cells_summary().map(String::from);
+        let changes = validator
+            .changes()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
         validator.validate_excel().map_err(|e| {
             let details: Vec<String> = validator
                 .validation_reports
@@ -116,6 +123,7 @@ fn run_with_schema(
         Ok(Unpivoted {
             summary,
             error_cells,
+            changes,
             csv_lines,
         })
     })();
@@ -992,4 +1000,41 @@ fn ns_among_the_given_markers_is_refused_as_it_gives_no_row() {
         );
         assert!(err.contains(&expected), "{expected}\n{err}");
     }
+}
+
+/// Every change to a sample cell is listed, in sheet order, with its reason; cells taken as
+/// written are not.
+#[test]
+fn every_change_to_a_sample_cell_is_listed_with_its_reason() {
+    let mut rows = limits_sheet(Number(0.25), [Text("<loq:0.25"), Text(" ns "), Empty]);
+    rows.push(vec![
+        Text("Azaspiracid-2"),
+        Text("2A"),
+        Number(0.1),
+        Number(0.25),
+        Error("#VALUE!"),
+        Text("<lod"),
+        Text("<LOD"),
+    ]);
+
+    let unpivoted = run_with_schema("unpivot-changes", &rows, spec(), text_schema()).unwrap();
+
+    let expected = vec![
+        "row 2, column E \"ST01\": written as \"<LOQ\" instead of \"<loq:0.25\": the number after the marker is the row's Limit of quantification",
+        "row 2, column F \"ST02\": no row: \"ns\" means no sample",
+        "row 2, column G \"ST03\": no row: blank cell, no result",
+        "row 3, column E \"ST01\": emptied: Excel error #VALUE!, a failed calculation, read as a blank cell",
+        "row 3, column E \"ST01\": no row: blank cell, no result",
+        "row 3, column F \"ST02\": written as \"<LOD\" instead of \"<lod\": markers are written uppercase",
+    ];
+    assert_eq!(unpivoted.changes, expected);
+}
+
+#[test]
+fn a_sheet_taken_as_written_lists_no_changes() {
+    let rows = limits_sheet(Number(0.25), [Text("<LOQ"), Text(" <LOD "), Number(0.3)]);
+
+    let unpivoted = run_with_schema("unpivot-no-changes", &rows, spec(), text_schema()).unwrap();
+
+    assert_eq!(unpivoted.changes, Vec::<String>::new());
 }
