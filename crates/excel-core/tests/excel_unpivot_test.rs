@@ -1478,3 +1478,59 @@ fn a_sheet_without_the_concentration_units_column_is_refused() {
     let expected = "it has no \"Concentration units\" column before the sample columns";
     assert!(err.contains(expected), "{err}");
 }
+
+/// Every problem that stops the run is reported together, after the changes and questions are
+/// known, so one run shows the data owners everything to correct and answer.
+#[test]
+fn every_problem_is_reported_in_one_run_with_the_changes_and_questions() {
+    let mut rows = analytical_sheet(
+        &["ST01", "ST02"],
+        vec![
+            vec![
+                Empty,
+                Text("ng/L"),
+                Number(0.1),
+                Number(0.25),
+                Text("X"),
+                Number(0.2),
+            ],
+            vec![Empty, Text("ng/mL"), Empty, Empty, Number(0.3), Empty],
+            vec![Empty, Text("items"), Empty, Empty, Number(1.5), Number(2.0)],
+        ],
+    );
+    // Row 3's identification level is not 2A
+    rows[2][1] = Number(1.0);
+    let xlsx = write_test_workbook("all-problems", &rows);
+
+    let mut validator = ExcelValidatorBuilder::new(xlsx.to_str().unwrap(), "Sheet1", text_schema())
+        .unpivot(spec())
+        .build()
+        .unwrap_or_else(|e| panic!("the problems must not stop the build: {e:#}"));
+    let changes: Vec<String> = validator
+        .changes()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    let questions: Vec<String> = validator
+        .questions()
+        .iter()
+        .map(|(question, cells)| format!("{cells} cell(s): {question}"))
+        .collect();
+    let err = validator
+        .validate_excel()
+        .expect_err("the problems must stop the run")
+        .to_string();
+    let _ = std::fs::remove_file(&xlsx);
+
+    let expected =
+        vec!["row 3, column G \"ST01\": no row: Concentration units \"ng/mL\" are not imported"];
+    assert_eq!(changes, expected);
+    assert_eq!(questions.len(), 2, "{questions:?}");
+    let expected = "The sheet \"Sheet1\" has 2 result(s) that cannot be imported. Correct these cells in the source file and try again:
+  row 2, column G \"ST01\": 'X' in an ng/L row: X is a Peak Area result, so correct the Concentration units or the result
+  row 4, column G \"ST01\": '1.5' is not a whole number of items";
+    assert!(err.contains(expected), "{err}");
+    let expected = "The sheet \"Sheet1\" has 1 row(s) whose Identification Level is not 2A. Analytical results are always identification level 2A: correct these cells in the source file and try again:
+  row 3: 1";
+    assert!(err.contains(expected), "{err}");
+}

@@ -391,6 +391,8 @@ struct ProcessedSheet {
     changes: Vec<Change>,
     /// The open questions, each with the number of cells concerned
     questions: Vec<(Question, usize)>,
+    /// What stops the run until the source is corrected, each a message listing its cells
+    problems: Vec<String>,
     /// The markers allowed in the values field, when an unpivot sends its cells to a text field
     values_markers: Option<ValuesMarkers>,
 }
@@ -501,6 +503,7 @@ pub struct ExcelValidator {
     error_cells_summary: Option<String>,
     changes: Vec<Change>,
     questions: Vec<(Question, usize)>,
+    problems: Vec<String>,
     values_markers: Option<ValuesMarkers>,
 }
 
@@ -805,6 +808,7 @@ impl ExcelValidatorBuilder {
             error_cells_summary: None,
             changes: Vec::new(),
             questions: Vec::new(),
+            problems: Vec::new(),
             values_markers: None,
         };
 
@@ -825,6 +829,7 @@ impl ExcelValidatorBuilder {
             error_cells_summary: sheet.error_cells_summary,
             changes: sheet.changes,
             questions: sheet.questions,
+            problems: sheet.problems,
             values_markers: sheet.values_markers,
         })
     }
@@ -857,6 +862,7 @@ impl ExcelValidator {
             error_cells_summary: None,
             changes: Vec::new(),
             questions: Vec::new(),
+            problems: Vec::new(),
             values_markers: None,
         })
     }
@@ -908,9 +914,15 @@ impl ExcelValidator {
     }
 
     pub fn validate_excel(&mut self) -> Result<()> {
+        // What stops the run in the rows read: reported with the validation errors, not instead
+        let problems = self.problems.join("\n");
         let row_count = self.rows.len();
         if row_count == 0 {
-            return Err(anyhow::anyhow!("The Excel file is empty"));
+            return Err(if problems.is_empty() {
+                anyhow::anyhow!("The Excel file is empty")
+            } else {
+                anyhow::anyhow!("{problems}")
+            });
         }
 
         for (row_number, json_obj) in &self.rows {
@@ -942,19 +954,25 @@ impl ExcelValidator {
 
             // Return error if validation failed. If the log cannot be written, carry the details
             // in the error itself rather than pointing the user at a log that lacks them.
-            return Err(
-                match write_error_to_log("Excel Validation Error Report", &validation_report) {
-                    Ok(()) => anyhow::anyhow!("{} Check the error log for details.", summary),
-                    Err(e) => anyhow::anyhow!(
-                        "{} The error log could not be written ({}), so the details follow:\n{}",
-                        summary,
-                        e,
-                        validation_report
-                    ),
-                },
-            );
+            let validation = match write_error_to_log(
+                "Excel Validation Error Report",
+                &validation_report,
+            ) {
+                Ok(()) => format!("{summary} Check the error log for details."),
+                Err(e) => format!(
+                    "{summary} The error log could not be written ({e}), so the details follow:\n{validation_report}"
+                ),
+            };
+            return Err(if problems.is_empty() {
+                anyhow::anyhow!("{validation}")
+            } else {
+                anyhow::anyhow!("{problems}\n{validation}")
+            });
         }
 
+        if !problems.is_empty() {
+            return Err(anyhow::anyhow!("{problems}"));
+        }
         Ok(())
     }
 
@@ -1567,8 +1585,11 @@ impl ExcelValidator {
             }
         }
 
+        // Problems in the rows stop the run, but only once every row has been read, so that one
+        // run reports all of them, with the changes and questions
+        let mut problems: Vec<String> = Vec::new();
         if !unnamed_columns_with_data.is_empty() {
-            return Err(anyhow::anyhow!(
+            problems.push(format!(
                 "The sheet \"{}\" has data in {} column(s) without a header. Add a header or clear these cells and try again:\n  {}",
                 self.sheet_name,
                 unnamed_columns_with_data.len(),
@@ -1580,7 +1601,7 @@ impl ExcelValidator {
         }
 
         if !refused_results.is_empty() {
-            return Err(anyhow::anyhow!(
+            problems.push(format!(
                 "The sheet \"{}\" has {} result(s) that cannot be imported. Correct these cells in the source file and try again:\n  {}",
                 self.sheet_name,
                 refused_results.len(),
@@ -1589,7 +1610,7 @@ impl ExcelValidator {
         }
 
         if !wrong_identification_levels.is_empty() {
-            return Err(anyhow::anyhow!(
+            problems.push(format!(
                 "The sheet \"{}\" has {} row(s) whose {} is not {}. Analytical results are always identification level {}: correct these cells in the source file and try again:\n  {}",
                 self.sheet_name,
                 wrong_identification_levels.len(),
@@ -1705,6 +1726,7 @@ impl ExcelValidator {
             }),
             changes,
             questions: questions.into_iter().collect(),
+            problems,
             values_markers,
         })
     }

@@ -252,6 +252,8 @@ Blank sample cells are not listed, as a sheet has thousands: the summary line co
 
 Rows that fail validation are not changes: they are listed in `errors.log`.
 
+Problems that must be corrected in the source file (an Identification Level that is not `2A`, results that cannot be imported, data in a column without a header) stop the run only once every row has been read. So one run reports all of them together, after the summary, the changes and the questions, and nothing is written or uploaded.
+
 ### Error Log File
 The application creates an `errors.log` file containing:
 - Timestamp of validation run
