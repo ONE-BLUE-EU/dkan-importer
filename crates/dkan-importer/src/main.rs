@@ -122,9 +122,9 @@ struct Args {
     /// row in errors.log.
     ///
     /// Giving markers replaces the default ones; list all you need after one
-    /// flag. A sample cell holding NS (no sample) gives no row, so NS cannot be
-    /// a marker. ND, <LQ and NQ are refused, even when given here: ND maps to NS,
-    /// and <LQ and NQ map to <LOQ, so change them in the source file, for
+    /// flag. A sample cell holding NS (no sample), or ND (treated as NS), gives
+    /// no row, so neither can be a marker. <LQ and NQ are refused, even when
+    /// given here: they map to <LOQ, so change them in the source file, for
     /// consistency. If the values column is a number field, the markers are not
     /// used: the field already refuses all text, including these markers.
     ///

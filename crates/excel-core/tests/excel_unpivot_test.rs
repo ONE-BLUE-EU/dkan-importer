@@ -682,7 +682,7 @@ fn a_marker_limit_without_both_sides_is_refused() {
 
 /// ND (not detected) is written NS everywhere, so that one meaning has one marker.
 #[test]
-fn nd_among_the_given_markers_is_refused_pointing_to_ns() {
+fn nd_among_the_given_markers_is_refused_as_it_gives_no_row() {
     for nd in ["ND", " nd "] {
         let unpivot = Unpivot {
             values_markers: vec!["<LOD".to_string(), nd.to_string()],
@@ -693,29 +693,51 @@ fn nd_among_the_given_markers_is_refused_pointing_to_ns() {
         let err = run_with_schema("unpivot-nd-marker", &rows, unpivot, text_schema()).unwrap_err();
 
         let expected = format!(
-            "\"{}\" cannot be a values marker: ND maps to NS. Use NS, and change ND to NS in the source file, for consistency.",
+            "\"{}\" cannot be a values marker: ND cells are treated as NS (no sample) and give no row.",
             nd.trim()
         );
         assert!(err.contains(&expected), "{expected}\n{err}");
     }
 }
 
+/// ND is treated as NS: no sample, so no row, and the run log says so for each cell.
 #[test]
-fn nd_in_a_sample_cell_is_a_validation_error_pointing_to_ns() {
-    let rows = marker_sheet([Text("ND"), Text("nd"), Text("NS")]);
+fn nd_cells_are_treated_as_ns_and_give_no_row() {
+    let mut rows = marker_sheet([Text("ND"), Text(" nd "), Text("NS")]);
+    rows.push(vec![
+        Text("Azaspiracid-2"),
+        Text("2A"),
+        Text("ng/L"),
+        Number(1.25),
+        Empty,
+        Empty,
+    ]);
 
-    let err = run_with_schema("unpivot-nd-cell", &rows, spec(), text_schema()).unwrap_err();
+    let unpivoted = run_with_schema("unpivot-nd-cell", &rows, spec(), text_schema()).unwrap();
 
-    for value in ["ND", "nd"] {
-        let expected = format!(
-            "row[2]./Concentration: '{value}' is not allowed: ND maps to NS. Change it to NS in the source file, for consistency."
-        );
-        assert!(err.contains(&expected), "{expected}\n{err}");
-    }
-    assert!(!err.contains("'NS'"), "{err}");
+    let expected = vec![
+        "Substance,Identification Level,Units,Sample Tag,Concentration",
+        "Azaspiracid-2,2A,ng/L,ST01,1.25",
+    ];
+    assert_eq!(unpivoted.csv_lines, expected);
+    let expected = vec![
+        "row 2, column D \"ST01\": no row: \"ND\" is treated as NS (no sample)",
+        "row 2, column E \"ST02\": no row: \"nd\" is treated as NS (no sample)",
+        "row 2, column F \"ST03\": no row: \"NS\" means no sample",
+        "row 3, column E \"ST02\": no row: blank cell, no result",
+        "row 3, column F \"ST03\": no row: blank cell, no result",
+    ];
+    assert_eq!(unpivoted.changes, expected);
+    assert!(
+        unpivoted.summary.contains(
+            ": 1 row(s); 2 blank sample cell(s) skipped; 3 NS or ND (no sample) cell(s) skipped."
+        ),
+        "{}",
+        unpivoted.summary
+    );
 }
 
-/// <LQ is written <LOQ everywhere, like ND and NS.
+/// <LQ is written <LOQ everywhere.
 #[test]
 fn lq_among_the_given_markers_is_refused_pointing_to_loq() {
     let unpivot = Unpivot {
@@ -965,7 +987,7 @@ fn ns_cells_give_no_row_and_are_counted() {
         "Okadaic acid,2A,ng/L,ST03,0.4",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
-    let expected = "Keeping 3 column(s) A-C (Substance … Units); unpivoting 3 column(s) D-F (ST01 … ST03) into Sample Tag / Concentration: 1 row(s); 2 NS (no sample) cell(s) skipped. Concentration takes numbers or <LOD, <LOQ.";
+    let expected = "Keeping 3 column(s) A-C (Substance … Units); unpivoting 3 column(s) D-F (ST01 … ST03) into Sample Tag / Concentration: 1 row(s); 2 NS or ND (no sample) cell(s) skipped. Concentration takes numbers or <LOD, <LOQ.";
     assert_eq!(unpivoted.summary, expected);
 }
 

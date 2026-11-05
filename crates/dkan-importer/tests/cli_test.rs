@@ -108,7 +108,7 @@ fn unpivot_with_several_values_markers_is_accepted() {
 
 /// Refused before anything runs, even when given on purpose.
 #[test]
-fn nd_as_a_values_marker_is_refused_pointing_to_ns() {
+fn nd_as_a_values_marker_is_refused_as_it_gives_no_row() {
     let output = run(&[
         "--unpivot",
         "--headers-column",
@@ -120,7 +120,7 @@ fn nd_as_a_values_marker_is_refused_pointing_to_ns() {
 
     assert_usage_error(
         &output,
-        "\"ND\" cannot be a values marker: ND maps to NS. Use NS, and change ND to NS in the source file, for consistency.",
+        "\"ND\" cannot be a values marker: ND cells are treated as NS (no sample) and give no row.",
     );
 }
 

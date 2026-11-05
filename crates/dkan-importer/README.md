@@ -107,8 +107,8 @@ Invalid format at row[2]./Concentration: '<LDO' is not a number or one of the ma
 ```
 
 - The default markers are `<LOD` and `<LOQ`. Giving `--values-markers` replaces them, so list all of them: `--values-markers "<LOD" "<LOQ" "<MDL"`.
-- `NS` (no sample) is no result, so a sample cell holding it gives no row, with any values field, like a blank cell. The summary line counts them: `...: 518 row(s); 12 NS (no sample) cell(s) skipped.` For the same reason `NS` cannot be one of the `--values-markers`.
-- `ND`, `<LQ` and `NQ` are refused, even when given in `--values-markers`: `ND` maps to `NS`, and `<LQ` and `NQ` map to `<LOQ`, so change them in the source file, for consistency. A sample cell with any of them (any case, also with a limit, as in `<LQ:0.25`) is a validation error saying so: `'ND' is not allowed: ND maps to NS. Change it to NS in the source file, for consistency.`
+- `NS` (no sample) is no result, so a sample cell holding it gives no row, with any values field, like a blank cell. `ND` is treated the same as `NS`. The summary line counts them: `...: 518 row(s); 12 NS or ND (no sample) cell(s) skipped.`, and the run log lists each one. For the same reason neither can be one of the `--values-markers`.
+- `<LQ` and `NQ` are refused, even when given in `--values-markers`: they map to `<LOQ`, so change them in the source file, for consistency. A sample cell with either (any case, also with a limit, as in `<LQ:0.25`) is a validation error saying so: `'<LQ' is not allowed: <LQ maps to <LOQ. Change it to <LOQ in the source file, for consistency.`
 - Markers match ignoring case and are written uppercase, so `<lod` is uploaded as `<LOD`, also when given in `--values-markers` or `--marker-limits`. Spaces around a cell's text are ignored, so `<LOQ ` is `<LOQ`.
 - Numbers are uploaded as Excel stores them (`0.880999866251062`).
 - With a number field the markers are not used, because the field already refuses all text.

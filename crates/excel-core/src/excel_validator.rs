@@ -84,7 +84,16 @@ impl std::fmt::Display for Change {
             Change::Skipped {
                 cell,
                 reason: SkipReason::NoSample(text),
-            } => write!(f, "{cell}: no row: \"{text}\" means no sample"),
+            } if text.eq_ignore_ascii_case(NO_SAMPLE) => {
+                write!(f, "{cell}: no row: \"{text}\" means no sample")
+            }
+            Change::Skipped {
+                cell,
+                reason: SkipReason::NoSample(text),
+            } => write!(
+                f,
+                "{cell}: no row: \"{text}\" is treated as {NO_SAMPLE} (no sample)"
+            ),
             Change::Rewritten {
                 cell,
                 was,
@@ -311,6 +320,9 @@ pub const DEFAULT_VALUES_MARKERS: [&str; 2] = ["<LOD", "<LOQ"];
 /// the cell gives no row, like a blank one. Matched ignoring case.
 const NO_SAMPLE: &str = "NS";
 
+/// A sample cell some sheets use for [`NO_SAMPLE`], treated the same way. Matched ignoring case.
+const NO_SAMPLE_ALIAS: &str = "ND";
+
 /// The field holding an analytical result's identification level. An unpivoted sheet must have
 /// it among its kept columns, holding [`IDENTIFICATION_LEVEL`] in every row with a result.
 pub const IDENTIFICATION_LEVEL_FIELD: &str = "Identification Level";
@@ -323,7 +335,7 @@ pub const IDENTIFICATION_LEVEL: &str = "2A";
 /// instead, so that one meaning is written one way across datasets. They are refused, even
 /// when given on purpose, both as values markers and in sample cells (also when followed by
 /// `:` and a limit, as in `<LQ:0.25`). Matched ignoring case.
-const REPLACED_MARKERS: [(&str, &str); 3] = [("ND", "NS"), ("<LQ", "<LOQ"), ("NQ", "<LOQ")];
+const REPLACED_MARKERS: [(&str, &str); 2] = [("<LQ", "<LOQ"), ("NQ", "<LOQ")];
 
 /// The marker that replaces `value`, when it is one of [`REPLACED_MARKERS`], alone or followed
 /// by `:`
@@ -345,12 +357,17 @@ fn strip_marker<'a>(value: &'a str, marker: &str) -> Option<&'a str> {
 }
 
 /// A values marker as given, trimmed and uppercase. Refuses a marker that another one replaces,
-/// such as `ND` (see [`REPLACED_MARKERS`]).
+/// such as `<LQ` (see [`REPLACED_MARKERS`]), and the cells that give no row, such as `NS`.
 pub fn parse_values_marker(marker: &str) -> std::result::Result<String, String> {
     let marker = marker.trim();
     if marker.eq_ignore_ascii_case(NO_SAMPLE) {
         return Err(format!(
             "\"{marker}\" cannot be a values marker: {NO_SAMPLE} (no sample) cells give no row."
+        ));
+    }
+    if marker.eq_ignore_ascii_case(NO_SAMPLE_ALIAS) {
+        return Err(format!(
+            "\"{marker}\" cannot be a values marker: {NO_SAMPLE_ALIAS} cells are treated as {NO_SAMPLE} (no sample) and give no row."
         ));
     }
     match replaced_marker(marker) {
@@ -1274,7 +1291,7 @@ impl ExcelValidator {
             }
             if no_sample_cells > 0 {
                 blanks.push_str(&format!(
-                    "; {no_sample_cells} {NO_SAMPLE} (no sample) cell(s) skipped"
+                    "; {no_sample_cells} {NO_SAMPLE} or {NO_SAMPLE_ALIAS} (no sample) cell(s) skipped"
                 ));
             }
             format!(
@@ -2799,9 +2816,12 @@ impl ExcelValidator {
 }
 
 /// A cell with nothing in it but whitespace.
-/// A sample cell without a result, which gives no row: blank, or [`NO_SAMPLE`]
+/// A sample cell without a result, which gives no row: blank, [`NO_SAMPLE`] or
+/// [`NO_SAMPLE_ALIAS`]
 fn is_no_result(cell: &Data) -> bool {
-    is_blank(cell) || matches!(cell, Data::String(s) if s.trim().eq_ignore_ascii_case(NO_SAMPLE))
+    is_blank(cell)
+        || matches!(cell, Data::String(s)
+            if [NO_SAMPLE, NO_SAMPLE_ALIAS].iter().any(|ns| s.trim().eq_ignore_ascii_case(ns)))
 }
 
 fn is_blank(cell: &Data) -> bool {
