@@ -217,18 +217,21 @@ impl std::str::FromStr for MarkerLimit {
 }
 
 /// The limit columns analytical results sheets have for [`DEFAULT_VALUES_MARKERS`], as
-/// `MARKER=FIELD`. `NS` has no limit.
+/// `MARKER=FIELD`.
 pub const DEFAULT_MARKER_LIMITS: [&str; 2] =
     ["<LOD=Limit of detection", "<LOQ=Limit of quantification"];
 
 /// The markers analytical results use in place of a concentration:
 /// - `<LOD`: below the limit of detection (the substance was not detected)
 /// - `<LOQ`: below the limit of quantification (detected, but too little to measure)
-/// - `NS`: no sample was taken at that station or depth
 ///
 /// The limits themselves are in their own columns ("Limit of detection", "Limit of
 /// quantification"), so the markers are kept as written rather than replaced by a number.
-pub const DEFAULT_VALUES_MARKERS: [&str; 3] = ["<LOD", "<LOQ", "NS"];
+pub const DEFAULT_VALUES_MARKERS: [&str; 2] = ["<LOD", "<LOQ"];
+
+/// A sample cell meaning no sample was taken at that station or depth. There is no result, so
+/// the cell gives no row, like a blank one. Matched ignoring case.
+const NO_SAMPLE: &str = "NS";
 
 /// The field holding an analytical result's identification level. An unpivoted sheet must have
 /// it among its kept columns, holding [`IDENTIFICATION_LEVEL`] in every row with a result.
@@ -267,6 +270,11 @@ fn strip_marker<'a>(value: &'a str, marker: &str) -> Option<&'a str> {
 /// such as `ND` (see [`REPLACED_MARKERS`]).
 pub fn parse_values_marker(marker: &str) -> std::result::Result<String, String> {
     let marker = marker.trim();
+    if marker.eq_ignore_ascii_case(NO_SAMPLE) {
+        return Err(format!(
+            "\"{marker}\" cannot be a values marker: {NO_SAMPLE} (no sample) cells give no row."
+        ));
+    }
     match replaced_marker(marker) {
         Some((old, new)) => Err(format!(
             "\"{marker}\" cannot be a values marker: {old} maps to {new}. Use {new}, and change {old} to {new} in the source file, for consistency."
@@ -871,6 +879,8 @@ impl ExcelValidator {
         let mut markers_without_limit: usize = 0;
         // Blank sample cells: no result, so no row
         let mut blank_sample_cells: usize = 0;
+        // NS sample cells: no sample, so no row
+        let mut no_sample_cells: usize = 0;
         // Rows with results whose identification level is not IDENTIFICATION_LEVEL
         let mut wrong_identification_levels: Vec<String> = Vec::new();
         let mut parsed_rows: Vec<ParsedExcelRow> = Vec::new();
@@ -1032,7 +1042,7 @@ impl ExcelValidator {
             let has_results = samples
                 .columns
                 .iter()
-                .any(|(col_idx, _)| row.get(*col_idx).is_some_and(|cell| !is_blank(cell)));
+                .any(|(col_idx, _)| row.get(*col_idx).is_some_and(|cell| !is_no_result(cell)));
             match row.get(samples.identification_level) {
                 _ if !has_results => {}
                 Some(Data::String(level)) if level.trim() == IDENTIFICATION_LEVEL => {}
@@ -1048,6 +1058,10 @@ impl ExcelValidator {
                     blank_sample_cells = blank_sample_cells.saturating_add(1);
                     continue;
                 };
+                if is_no_result(cell) {
+                    no_sample_cells = no_sample_cells.saturating_add(1);
+                    continue;
+                }
                 let mut sample_obj = json_obj.clone();
                 sample_obj.insert(
                     samples.headers_column.clone(),
@@ -1141,11 +1155,15 @@ impl ExcelValidator {
                     )
                 })
                 .unwrap_or_default();
-            let blanks = if blank_sample_cells > 0 {
-                format!("; {blank_sample_cells} blank sample cell(s) skipped")
-            } else {
-                String::new()
-            };
+            let mut blanks = String::new();
+            if blank_sample_cells > 0 {
+                blanks.push_str(&format!("; {blank_sample_cells} blank sample cell(s) skipped"));
+            }
+            if no_sample_cells > 0 {
+                blanks.push_str(&format!(
+                    "; {no_sample_cells} {NO_SAMPLE} (no sample) cell(s) skipped"
+                ));
+            }
             format!(
                 "Keeping {} column(s) {}; unpivoting {} column(s) {} into {} / {}: {} row(s){}.{}",
                 kept_columns.len(),
@@ -2659,6 +2677,11 @@ impl ExcelValidator {
 }
 
 /// A cell with nothing in it but whitespace.
+/// A sample cell without a result, which gives no row: blank, or [`NO_SAMPLE`]
+fn is_no_result(cell: &Data) -> bool {
+    is_blank(cell) || matches!(cell, Data::String(s) if s.trim().eq_ignore_ascii_case(NO_SAMPLE))
+}
+
 fn is_blank(cell: &Data) -> bool {
     match cell {
         Data::Empty => true,

@@ -194,7 +194,7 @@ fn blank_sample_cells_in_every_form_produce_no_row() {
         "Azaspiracid-2,2A,ng/L,ST01,1.25",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
-    let expected = "Keeping 3 column(s) A-C (Substance … Units); unpivoting 3 column(s) D-F (ST01 … ST03) into Sample Tag / Concentration: 1 row(s); 5 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ, NS.";
+    let expected = "Keeping 3 column(s) A-C (Substance … Units); unpivoting 3 column(s) D-F (ST01 … ST03) into Sample Tag / Concentration: 1 row(s); 5 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ.";
     assert_eq!(unpivoted.summary, expected);
 }
 
@@ -432,7 +432,7 @@ fn marker_sheet(cells: [Cell; 3]) -> Vec<Vec<Cell>> {
 
 #[test]
 fn a_text_values_field_takes_numbers_and_markers_as_written() {
-    let mut rows = marker_sheet([Number(0.880999866251062), Text("NS "), Text("<LOD")]);
+    let mut rows = marker_sheet([Number(0.880999866251062), Text("<LOQ "), Text("<LOD")]);
     rows.push(vec![
         Text("Azaspiracid-2"),
         Text("2A"),
@@ -447,7 +447,7 @@ fn a_text_values_field_takes_numbers_and_markers_as_written() {
     let expected = vec![
         "Substance,Identification Level,Units,Sample Tag,Concentration",
         "Okadaic acid,2A,ng/L,ST01,0.880999866251062",
-        "Okadaic acid,2A,ng/L,ST02,NS",
+        "Okadaic acid,2A,ng/L,ST02,<LOQ",
         "Okadaic acid,2A,ng/L,ST03,<LOD",
         "Azaspiracid-2,2A,ng/L,ST01,<LOQ",
         "Azaspiracid-2,2A,ng/L,ST03,0.5",
@@ -463,7 +463,7 @@ fn other_text_in_a_text_values_field_is_a_validation_error_naming_the_markers() 
 
     for value in ["<LDO", "n.d.", "NaN"] {
         let expected = format!(
-            "row[2]./Concentration: '{value}' is not a number or one of the markers <LOD, <LOQ, NS"
+            "row[2]./Concentration: '{value}' is not a number or one of the markers <LOD, <LOQ"
         );
         assert!(err.contains(&expected), "{expected}\n{err}");
     }
@@ -494,7 +494,7 @@ fn the_summary_of_a_text_values_field_names_the_markers() {
     )
     .unwrap();
 
-    let expected = "Keeping 3 column(s) A-C (Substance … Units); unpivoting 2 column(s) D-E (ST01 … ST02) into Sample Tag / Concentration: 3 row(s); 1 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ, NS.";
+    let expected = "Keeping 3 column(s) A-C (Substance … Units); unpivoting 2 column(s) D-E (ST01 … ST02) into Sample Tag / Concentration: 3 row(s); 1 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ.";
     assert_eq!(unpivoted.summary, expected);
 }
 
@@ -539,7 +539,7 @@ fn a_marker_followed_by_the_rows_limit_is_written_as_the_marker() {
         "Okadaic acid,2A,0.1,0.25,ST03,0.3",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
-    let expected_summary = "Concentration takes numbers or <LOD, <LOQ, NS. 2 value(s) written as their marker alone, the number after it being the row's limit: <LOD (Limit of detection), <LOQ (Limit of quantification).";
+    let expected_summary = "Concentration takes numbers or <LOD, <LOQ. 2 value(s) written as their marker alone, the number after it being the row's limit: <LOD (Limit of detection), <LOQ (Limit of quantification).";
     assert!(
         unpivoted.summary.ends_with(expected_summary),
         "{}",
@@ -556,7 +556,7 @@ fn without_such_values_the_summary_does_not_mention_limits() {
     assert!(
         unpivoted
             .summary
-            .ends_with("Concentration takes numbers or <LOD, <LOQ, NS."),
+            .ends_with("Concentration takes numbers or <LOD, <LOQ."),
         "{}",
         unpivoted.summary
     );
@@ -598,7 +598,7 @@ fn a_marker_without_a_limit_followed_by_a_number_is_a_validation_error() {
     let err = run_with_schema("unpivot-limit-ns", &rows, spec(), text_schema()).unwrap_err();
 
     let expected =
-        "row[2]./Concentration: 'NS:0.25' is not a number or one of the markers <LOD, <LOQ, NS";
+        "row[2]./Concentration: 'NS:0.25' is not a number or one of the markers <LOD, <LOQ";
     assert!(err.contains(expected), "{err}");
 }
 
@@ -620,14 +620,14 @@ fn a_limit_that_is_not_a_dictionary_field_is_refused() {
 #[test]
 fn a_limit_for_a_marker_that_is_not_a_values_marker_does_not_apply() {
     let unpivot = Unpivot {
-        values_markers: vec!["NS".to_string()],
+        values_markers: vec!["<LOD".to_string()],
         ..spec()
     };
-    let rows = limits_sheet(Number(0.25), [Text("NS"), Text("<LOQ:0.25"), Number(0.3)]);
+    let rows = limits_sheet(Number(0.25), [Text("<LOD"), Text("<LOQ:0.25"), Number(0.3)]);
 
     let err = run_with_schema("unpivot-limit-marker", &rows, unpivot, text_schema()).unwrap_err();
 
-    let expected = "row[2]./Concentration: '<LOQ:0.25' is not a number or one of the markers NS";
+    let expected = "row[2]./Concentration: '<LOQ:0.25' is not a number or one of the markers <LOD";
     assert!(err.contains(expected), "{err}");
 }
 
@@ -677,10 +677,10 @@ fn a_marker_limit_without_both_sides_is_refused() {
 fn nd_among_the_given_markers_is_refused_pointing_to_ns() {
     for nd in ["ND", " nd "] {
         let unpivot = Unpivot {
-            values_markers: vec!["NS".to_string(), nd.to_string()],
+            values_markers: vec!["<LOD".to_string(), nd.to_string()],
             ..spec()
         };
-        let rows = marker_sheet([Text("NS"), Text("NS"), Number(0.4)]);
+        let rows = marker_sheet([Text("<LOD"), Text("<LOD"), Number(0.4)]);
 
         let err = run_with_schema("unpivot-nd-marker", &rows, unpivot, text_schema()).unwrap_err();
 
@@ -779,16 +779,16 @@ fn nq_in_a_sample_cell_is_a_validation_error_pointing_to_loq() {
 #[test]
 fn markers_match_ignoring_case_and_are_written_uppercase() {
     let unpivot = Unpivot {
-        values_markers: vec!["<LOD".to_string(), "NS".to_string(), "X".to_string()],
+        values_markers: vec!["<LOD".to_string(), "X".to_string()],
         ..spec()
     };
-    let mut rows = marker_sheet([Text("x"), Text("ns"), Text("<lod")]);
+    let mut rows = marker_sheet([Text("x"), Text(" X "), Text("<lod")]);
     rows.push(vec![
         Text("Azaspiracid-2"),
         Text("2A"),
         Text("ng/L"),
         Text("X"),
-        Text(" nS "),
+        Text(" x"),
         Text("<LoD"),
     ]);
 
@@ -797,10 +797,10 @@ fn markers_match_ignoring_case_and_are_written_uppercase() {
     let expected = vec![
         "Substance,Identification Level,Units,Sample Tag,Concentration",
         "Okadaic acid,2A,ng/L,ST01,X",
-        "Okadaic acid,2A,ng/L,ST02,NS",
+        "Okadaic acid,2A,ng/L,ST02,X",
         "Okadaic acid,2A,ng/L,ST03,<LOD",
         "Azaspiracid-2,2A,ng/L,ST01,X",
-        "Azaspiracid-2,2A,ng/L,ST02,NS",
+        "Azaspiracid-2,2A,ng/L,ST02,X",
         "Azaspiracid-2,2A,ng/L,ST03,<LOD",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
@@ -930,6 +930,7 @@ fn rows_whose_identification_level_is_not_2a_stop_the_run_listing_each() {
     ]);
     // A row without results gives no rows, so its identification level does not matter
     rows.push(vec![Text("Okadaic acid"), Number(2.0), Empty]);
+    rows.push(vec![Text("Okadaic acid"), Number(2.0), Text("NS")]);
 
     let err = run("unpivot-level-not-2a", &rows, spec()).unwrap_err();
 
@@ -941,4 +942,54 @@ Analytical results are always identification level 2A: correct these cells in th
     assert!(err.contains(expected), "{err}");
     assert!(!err.contains("row 5"), "{err}");
     assert!(!err.contains("row 6"), "{err}");
+    assert!(!err.contains("row 7"), "{err}");
+}
+
+/// NS means no sample was taken, so there is no result to import.
+#[test]
+fn ns_cells_give_no_row_and_are_counted() {
+    let rows = marker_sheet([Text("NS"), Text(" ns "), Number(0.4)]);
+
+    let unpivoted = run_with_schema("unpivot-ns", &rows, spec(), text_schema()).unwrap();
+
+    let expected = vec![
+        "Substance,Identification Level,Units,Sample Tag,Concentration",
+        "Okadaic acid,2A,ng/L,ST03,0.4",
+    ];
+    assert_eq!(unpivoted.csv_lines, expected);
+    let expected = "Keeping 3 column(s) A-C (Substance … Units); unpivoting 3 column(s) D-F (ST01 … ST03) into Sample Tag / Concentration: 1 row(s); 2 NS (no sample) cell(s) skipped. Concentration takes numbers or <LOD, <LOQ.";
+    assert_eq!(unpivoted.summary, expected);
+}
+
+#[test]
+fn ns_cells_give_no_row_also_with_a_number_values_field() {
+    let rows = marker_sheet([Text("NS"), Number(0.88), Number(0.4)]);
+
+    let unpivoted = run("unpivot-ns-number", &rows, spec()).unwrap();
+
+    let expected = vec![
+        "Substance,Identification Level,Units,Sample Tag,Concentration",
+        "Okadaic acid,2A,ng/L,ST02,0.88",
+        "Okadaic acid,2A,ng/L,ST03,0.4",
+    ];
+    assert_eq!(unpivoted.csv_lines, expected);
+}
+
+#[test]
+fn ns_among_the_given_markers_is_refused_as_it_gives_no_row() {
+    for ns in ["NS", " ns "] {
+        let unpivot = Unpivot {
+            values_markers: vec!["<LOD".to_string(), ns.to_string()],
+            ..spec()
+        };
+        let rows = marker_sheet([Text("<LOD"), Number(0.88), Number(0.4)]);
+
+        let err = run_with_schema("unpivot-ns-marker", &rows, unpivot, text_schema()).unwrap_err();
+
+        let expected = format!(
+            "\"{}\" cannot be a values marker: NS (no sample) cells give no row.",
+            ns.trim()
+        );
+        assert!(err.contains(&expected), "{expected}\n{err}");
+    }
 }

@@ -110,8 +110,8 @@ struct Args {
     /// column is a text field. Only with --unpivot.
     ///
     /// Analytical results do not always have a number: a substance can be
-    /// below the limit of detection (<LOD) or of quantification (<LOQ), or no
-    /// sample was taken (NS). Keeping these as written needs a values column
+    /// below the limit of detection (<LOD) or of quantification (<LOQ).
+    /// Keeping these as written needs a values column
     /// that takes text, but a text field accepts anything, so a typo such as
     /// "<LDO" or "n.d." would be uploaded as data. With this option, each
     /// non-blank sample cell must be a number or one of these markers (ignoring
@@ -120,14 +120,15 @@ struct Args {
     /// row in errors.log.
     ///
     /// Giving markers replaces the default ones; list all you need after one
-    /// flag. ND, <LQ and NQ are refused, even when given here: ND maps to NS,
+    /// flag. A sample cell holding NS (no sample) gives no row, so NS cannot be
+    /// a marker. ND, <LQ and NQ are refused, even when given here: ND maps to NS,
     /// and <LQ and NQ map to <LOQ, so change them in the source file, for
     /// consistency. If the values column is a number field, the markers are not
     /// used: the field already refuses all text, including these markers.
     ///
     /// Example:
     ///   dkan-importer ... --unpivot --headers-column "Sample Tag" \
-    ///     --values-markers "<LOD" "<LOQ" "NS" "<MDL"
+    ///     --values-markers "<LOD" "<LOQ" "<MDL"
     #[arg(
         long,
         value_name = "MARKER",

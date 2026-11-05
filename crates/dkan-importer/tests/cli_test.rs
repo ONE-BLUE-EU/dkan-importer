@@ -89,7 +89,7 @@ fn nd_as_a_values_marker_is_refused_pointing_to_ns() {
         "--headers-column",
         "Sample Tag",
         "--values-markers",
-        "NS",
+        "<LOD",
         "ND",
     ]);
 
@@ -218,10 +218,7 @@ fn help_groups_the_unpivot_flags_with_their_default_and_an_example() {
         unpivot_section.contains("--values-markers <MARKER>..."),
         "{help}"
     );
-    assert!(
-        unpivot_section.contains("[default: <LOD <LOQ NS]"),
-        "{help}"
-    );
+    assert!(unpivot_section.contains("[default: <LOD <LOQ]"), "{help}");
     assert!(
         unpivot_section.contains("--marker-limits <MARKER=FIELD>..."),
         "{help}"
