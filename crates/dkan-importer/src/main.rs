@@ -6,9 +6,9 @@
 use clap::Parser;
 use dkan_importer::{
     model::DataDictionary,
-    run_log::{RunLog, changes_lines, questions_lines, run_log_filename},
+    run_log::{RunLog, changes_lines, questions_lines},
     utils::{
-        check_upload_login, dataset_add_distribution, delete_remote_file, generate_unique_filename,
+        RunFiles, check_upload_login, dataset_add_distribution, delete_remote_file,
         upload_distribution_csv_file,
     },
 };
@@ -205,7 +205,8 @@ struct Args {
 
 fn main() -> ExitCode {
     let arguments = Args::parse();
-    let log_path = run_log_filename(&arguments.dataset_id, &arguments.sheet_name);
+    let files = RunFiles::now(&arguments.dataset_id, &arguments.sheet_name);
+    let log_path = files.log.clone();
     let mut log = match RunLog::create(&log_path) {
         Ok(log) => log,
         Err(e) => {
@@ -213,7 +214,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match run(arguments, &mut log) {
+    match run(arguments, files.csv, &mut log) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             if let Err(log_error) = log.error(&format!("❌ {e}")) {
@@ -225,7 +226,11 @@ fn main() -> ExitCode {
 }
 
 /// The import itself. Everything it prints also goes to `log`; the password never does.
-fn run(arguments: Args, log: &mut RunLog) -> Result<(), Box<dyn std::error::Error>> {
+fn run(
+    arguments: Args,
+    csv_filename: String,
+    log: &mut RunLog,
+) -> Result<(), Box<dyn std::error::Error>> {
     log.note(&format!("Excel file: {}", arguments.excel_file))?;
     log.note(&format!("Sheet: {}", arguments.sheet_name))?;
     log.note(&format!("Dataset: {}", arguments.dataset_id))?;
@@ -303,7 +308,6 @@ fn run(arguments: Args, log: &mut RunLog) -> Result<(), Box<dyn std::error::Erro
     validator.validate_excel()?;
     log.info("✅ Validation completed!")?;
 
-    let csv_filename = generate_unique_filename(&arguments.dataset_id, &arguments.sheet_name);
     // Create a csv since the validation is successful. Use schema-aware parsing for proper date formatting.
     validator
         .export_to_csv(&csv_filename, title_to_name_mapping)

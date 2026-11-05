@@ -313,9 +313,15 @@ fn a_failed_run_leaves_a_run_log_with_the_error_and_without_the_password() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let expected_exit_code = Some(1);
     assert_eq!(output.status.code(), expected_exit_code, "{stderr}");
-    let log_path = dir.join("analytical_results_(i)_some-dataset.run.log");
-    let log = std::fs::read_to_string(&log_path)
-        .unwrap_or_else(|e| panic!("no run log at {}: {e}", log_path.display()));
+    let log_path = the_run_log_in(&dir);
+    let name = log_path.file_name().unwrap().to_string_lossy().to_string();
+    // Named like the CSV file of the same run: <sheet>_<YYYY-MM-DD_HH-MM-SS>_<dataset>
+    let timestamp = name
+        .strip_prefix("analytical_results_(i)_")
+        .and_then(|rest| rest.strip_suffix("_some-dataset.run.log"))
+        .unwrap_or_else(|| panic!("unexpected run log name {name}"));
+    assert_eq!(timestamp.len(), "2026-11-05_10-00-00".len(), "{name}");
+    let log = std::fs::read_to_string(&log_path).unwrap();
     assert!(log.contains("Excel file: unused.xlsx\n"), "{log}");
     assert!(log.contains("Sheet: Analytical results (I)\n"), "{log}");
     let error_line = stderr
@@ -327,17 +333,15 @@ fn a_failed_run_leaves_a_run_log_with_the_error_and_without_the_password() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The run log always describes the latest run of a dataset and sheet.
-#[test]
-fn each_run_replaces_the_run_log_of_the_last_one() {
-    let dir = new_run_dir("run-log-replaced");
-    let log_path = dir.join("sheet1_some-dataset.run.log");
-    std::fs::write(&log_path, "from an earlier run\n").unwrap();
-
-    run_in(&dir, &[]);
-
-    let log = std::fs::read_to_string(&log_path).unwrap();
-    assert!(!log.contains("from an earlier run"), "{log}");
-    assert!(log.contains("Sheet: Sheet1\n"), "{log}");
-    let _ = std::fs::remove_dir_all(&dir);
+/// The one run log a run wrote in `dir`
+fn the_run_log_in(dir: &Path) -> PathBuf {
+    let logs: Vec<PathBuf> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.to_string_lossy().ends_with(".run.log"))
+        .collect();
+    match logs.as_slice() {
+        [log] => log.clone(),
+        _ => panic!("expected one run log in {}: {logs:?}", dir.display()),
+    }
 }

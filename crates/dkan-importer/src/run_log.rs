@@ -1,21 +1,11 @@
 //! The run log: everything a run prints, every change it made to a cell with its reason, and the
 //! questions about the data it could not decide alone, so the data can be checked and corrected
-//! at its source. One file per dataset and sheet, rewritten by every run, so it always describes
-//! the latest one.
+//! at its source. One file per run, named like the run's CSV file (see
+//! [`crate::utils::RunFiles`]).
 
-use excel_core::utils::normalize_string;
 use excel_core::{Change, Question};
 use std::fs::File;
 use std::io::{self, Write};
-
-/// `<sheet>_<dataset>.run.log`, with the sheet name lowercase and its spaces as `_`, as in the
-/// CSV file name
-pub fn run_log_filename(dataset_id: &str, sheet_name: &str) -> String {
-    let sheet_name = normalize_string(sheet_name)
-        .replace(' ', "_")
-        .to_lowercase();
-    format!("{sheet_name}_{dataset_id}.run.log")
-}
 
 /// The run log's lines for `changes`: one per cell, as a sheet can have thousands
 pub fn changes_lines(changes: &[Change]) -> Vec<String> {
@@ -54,7 +44,7 @@ pub struct RunLog {
 }
 
 impl RunLog {
-    /// Create the file at `path`, replacing the log of an earlier run
+    /// Create the file at `path`
     pub fn create(path: &str) -> io::Result<Self> {
         Ok(RunLog {
             file: File::create(path)?,

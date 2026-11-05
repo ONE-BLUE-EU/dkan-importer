@@ -236,7 +236,7 @@ Example Excel structure:
 - Upload progress and success confirmation
 
 ### Run Log File
-Every run writes `<sheet>_<dataset>.run.log` in the current directory (the sheet name lowercase, with its spaces as `_`, as in `analytical_results_(i)_some-dataset.run.log`), next to the CSV file `<sheet>_<timestamp>_<dataset>.csv`. Each run replaces the log of the last run of that dataset and sheet, so it always describes the latest one. It is written even when the run stops, and never contains the password. It holds:
+Every run writes a log in the current directory, named exactly like the run's CSV file but ending in `.run.log`: `<sheet>_<YYYY-MM-DD_HH-MM-SS>_<dataset>.run.log`, lowercase, with the sheet name's spaces as `_`, as in `analytical_results_(i)_2026-11-05_10-00-00_some-dataset.run.log`. Each run writes its own log; the newest describes the latest run. It is written even when the run stops, and never contains the password. It holds:
 - What the run was given: the Excel file, sheet, dataset, data dictionary and DKAN URL
 - Every line the run printed, including the error that stopped it
 - Every change made to a cell instead of taking it as written, one line per cell with its reason, so the data can be checked and corrected at its source:
@@ -283,7 +283,7 @@ Errors:
 ### CSV Output
 Valid data is exported to a timestamped CSV file with the format:
 ```
-{dataset_id}_{data_dictionary_id}_{YYYY-MM-DD_HH-MM-SS}.csv
+<sheet>_<YYYY-MM-DD_HH-MM-SS>_<dataset>.csv
 ```
 
 ## Authentication
