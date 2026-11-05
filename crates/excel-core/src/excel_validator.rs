@@ -76,8 +76,8 @@ pub enum Change {
 pub enum SkipReason {
     /// No sample was taken; the cell's text as written, trimmed
     NoSample(String),
-    /// Not clear yet how to import it: see the question
-    Open(Question),
+    /// Not clear yet how to import it: the question to ask, and why this cell gives no row
+    Open { question: Question, reason: String },
 }
 
 impl std::fmt::Display for Change {
@@ -111,8 +111,8 @@ impl std::fmt::Display for Change {
             ),
             Change::Skipped {
                 cell,
-                reason: SkipReason::Open(question),
-            } => write!(f, "{cell}: no row: {}", question.reason()),
+                reason: SkipReason::Open { reason, .. },
+            } => write!(f, "{cell}: no row: {reason}"),
             Change::Derived {
                 cell,
                 field,
@@ -136,6 +136,10 @@ pub enum Question {
     MissingLimits,
     /// A number in a Peak Area row
     NumberInPeakArea,
+    /// X, a Peak Area result, in an ng/L row
+    XInNanogramsPerLitre,
+    /// An items result that is not a whole number of 0 or more
+    ItemsNotWholeNumber,
     /// Units other than ng/L, Peak Area and items, as written
     OtherUnits(String),
     /// A result that means nothing yet with its row's units: what the result is (`a number` or
@@ -158,6 +162,8 @@ impl Question {
                 "the ng/L row has no {LOD_FIELD} or no {LOQ_FIELD}, so its results cannot be characterised"
             ),
             Question::NumberInPeakArea => "a number in a Peak Area row".to_string(),
+            Question::XInNanogramsPerLitre => "X in an ng/L row".to_string(),
+            Question::ItemsNotWholeNumber => "not a whole number of items".to_string(),
             Question::OtherUnits(units) => format!("{UNITS_FIELD} \"{units}\" are not imported"),
             Question::UnclassifiedResult { result, units } => {
                 format!("{result} in a row {}", units_phrase(units.as_deref()))
@@ -188,6 +194,14 @@ impl std::fmt::Display for Question {
             Question::NumberInPeakArea => write!(
                 f,
                 "Numbers in Peak Area rows are not imported. Should they be imported as the Concentration, with which detection characterisation, and should a field mark them as peak areas?"
+            ),
+            Question::XInNanogramsPerLitre => write!(
+                f,
+                "X results in ng/L rows are not imported, as X is a Peak Area result. Are the units or the results wrong?"
+            ),
+            Question::ItemsNotWholeNumber => write!(
+                f,
+                "Items results that are not whole numbers of 0 or more are not imported. What do they mean?"
             ),
             Question::OtherUnits(units) => write!(
                 f,
@@ -262,10 +276,18 @@ enum Outcome {
         reason: String,
         question: Option<Question>,
     },
-    /// No row, until the question is answered
-    Open(Question),
-    /// The run stops until the source is corrected, for this reason
-    Refused(String),
+    /// No row until the question is answered, and why, for the cell's line in the run log
+    Open { question: Question, reason: String },
+}
+
+impl Outcome {
+    /// No row until `question` is answered, for its usual reason
+    fn open(question: Question) -> Self {
+        Outcome::Open {
+            reason: question.reason(),
+            question,
+        }
+    }
 }
 
 /// The detection characterisation of `result`, in a row with `units` and limits `lod`, `loq`;
@@ -283,7 +305,7 @@ fn characterise(
         question: (detection == DETECTED_NOT_QUANTIFIED).then_some(Question::DetectedNotQuantified),
     };
     let unclassified = |units: Option<String>| {
-        Outcome::Open(Question::UnclassifiedResult {
+        Outcome::open(Question::UnclassifiedResult {
             result: match result {
                 SampleResult::Number(_) => "a number".to_string(),
                 SampleResult::Marker(marker) => format!("\"{marker}\""),
@@ -294,12 +316,10 @@ fn characterise(
     match units {
         Units::NanogramsPerLitre => {
             if matches!(result, SampleResult::Marker(X_MARKER)) {
-                return Outcome::Refused(format!(
-                    "'{raw}' in an ng/L row: X is a Peak Area result, so correct the {UNITS_FIELD} or the result"
-                ));
+                return Outcome::open(Question::XInNanogramsPerLitre);
             }
             let (Some(lod), Some(loq)) = (lod, loq) else {
-                return Outcome::Open(Question::MissingLimits);
+                return Outcome::open(Question::MissingLimits);
             };
             match result {
                 SampleResult::Number(n) if *n >= loq => characterised(
@@ -328,7 +348,7 @@ fn characterise(
             SampleResult::Marker(X_MARKER) => {
                 characterised(DETECTED_QUALITATIVELY, "X in a Peak Area row".to_string())
             }
-            SampleResult::Number(_) => Outcome::Open(Question::NumberInPeakArea),
+            SampleResult::Number(_) => Outcome::open(Question::NumberInPeakArea),
             SampleResult::Marker(_) => unclassified(Some("Peak Area".to_string())),
         },
         Units::Missing => match result {
@@ -343,9 +363,12 @@ fn characterise(
             SampleResult::Number(n) if *n >= 0.0 && n.fract() == 0.0 => {
                 characterised(DETECTED_QUANTITATIVELY, "a count of items".to_string())
             }
-            _ => Outcome::Refused(format!("'{raw}' is not a whole number of items")),
+            _ => Outcome::Open {
+                question: Question::ItemsNotWholeNumber,
+                reason: format!("\"{raw}\" is not a whole number of items"),
+            },
         },
-        Units::Other(units) => Outcome::Open(Question::OtherUnits(units.clone())),
+        Units::Other(units) => Outcome::open(Question::OtherUnits(units.clone())),
     }
 }
 
@@ -1292,8 +1315,6 @@ impl ExcelValidator {
         let mut no_sample_cells: usize = 0;
         // Rows with results whose identification level is not IDENTIFICATION_LEVEL
         let mut wrong_identification_levels: Vec<String> = Vec::new();
-        // Results that stop the run until the source is corrected
-        let mut refused_results: Vec<String> = Vec::new();
         // Rows in ng/mL, which stop the run until they are removed from the source
         let mut ng_per_ml_rows: Vec<String> = Vec::new();
         // The open questions, each with the number of cells concerned
@@ -1576,17 +1597,13 @@ impl ExcelValidator {
                                 Value::String(detection.to_string()),
                             );
                         }
-                        Outcome::Open(question) => {
+                        Outcome::Open { question, reason } => {
                             let count = questions.entry(question.clone()).or_insert(0);
                             *count = count.saturating_add(1);
                             changes.push(Change::Skipped {
                                 cell: sheet_cell(*col_idx),
-                                reason: SkipReason::Open(question),
+                                reason: SkipReason::Open { question, reason },
                             });
-                            continue;
-                        }
-                        Outcome::Refused(why) => {
-                            refused_results.push(format!("{}: {why}", sheet_cell(*col_idx)));
                             continue;
                         }
                     }
@@ -1608,15 +1625,6 @@ impl ExcelValidator {
                     .into_values()
                     .collect::<Vec<_>>()
                     .join("\n  ")
-            ));
-        }
-
-        if !refused_results.is_empty() {
-            problems.push(format!(
-                "The sheet \"{}\" has {} result(s) that cannot be imported. Correct these cells in the source file and try again:\n  {}",
-                self.sheet_name,
-                refused_results.len(),
-                refused_results.join("\n  ")
             ));
         }
 

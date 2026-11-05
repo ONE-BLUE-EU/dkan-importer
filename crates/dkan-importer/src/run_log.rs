@@ -106,7 +106,10 @@ mod tests {
             },
             Change::Skipped {
                 cell: cell(),
-                reason: SkipReason::Open(Question::NumberInPeakArea),
+                reason: SkipReason::Open {
+                    question: Question::NumberInPeakArea,
+                    reason: "a number in a Peak Area row".to_string(),
+                },
             },
         ];
 

@@ -1313,7 +1313,7 @@ fn items_are_whole_numbers_detected_quantitatively() {
 }
 
 #[test]
-fn items_that_are_not_whole_numbers_stop_the_run_listing_each() {
+fn items_that_are_not_whole_numbers_give_no_row_and_a_question() {
     let rows = analytical_sheet(
         &["ST01", "ST02", "ST03"],
         vec![vec![
@@ -1327,18 +1327,27 @@ fn items_that_are_not_whole_numbers_stop_the_run_listing_each() {
         ]],
     );
 
-    let err = run_with_schema("detection-items-bad", &rows, spec(), text_schema()).unwrap_err();
+    let unpivoted = run_with_schema("detection-items-bad", &rows, spec(), text_schema()).unwrap();
 
-    let expected = "The sheet \"Sheet1\" has 2 result(s) that cannot be imported. Correct these cells in the source file and try again:
-  row 2, column G \"ST01\": '1.5' is not a whole number of items
-  row 2, column H \"ST02\": '<LOD' is not a whole number of items";
-    assert!(err.contains(expected), "{err}");
-    assert!(!err.contains("column I"), "{err}");
+    let expected = vec![
+        "Sample Tag,Concentration,Detection characterisation",
+        "ST03,2,detected quantitatively",
+    ];
+    assert_eq!(unpivoted.columns(&RESULTS), expected);
+    let expected = vec![
+        "row 2, column G \"ST01\": no row: \"1.5\" is not a whole number of items",
+        "row 2, column H \"ST02\": no row: \"<LOD\" is not a whole number of items",
+    ];
+    assert_eq!(unpivoted.changes, expected);
+    let expected = vec![
+        "2 cell(s): Items results that are not whole numbers of 0 or more are not imported. What do they mean?",
+    ];
+    assert_eq!(unpivoted.questions, expected);
 }
 
 /// X is a Peak Area result, so in an ng/L row the units or the result are wrong.
 #[test]
-fn x_in_an_ng_l_row_stops_the_run() {
+fn x_in_an_ng_l_row_gives_no_row_and_a_question() {
     let rows = analytical_sheet(
         &["ST01", "ST02"],
         vec![vec![
@@ -1351,11 +1360,19 @@ fn x_in_an_ng_l_row_stops_the_run() {
         ]],
     );
 
-    let err = run_with_schema("detection-x-ng-l", &rows, spec(), text_schema()).unwrap_err();
+    let unpivoted = run_with_schema("detection-x-ng-l", &rows, spec(), text_schema()).unwrap();
 
-    let expected = "row 2, column G \"ST01\": 'X' in an ng/L row: X is a Peak Area result, so correct the Concentration units or the result";
-    assert!(err.contains(expected), "{err}");
-    assert!(!err.contains("column H"), "{err}");
+    let expected = vec![
+        "Sample Tag,Concentration,Detection characterisation",
+        "ST02,0.3,detected quantitatively",
+    ];
+    assert_eq!(unpivoted.columns(&RESULTS), expected);
+    let expected = vec!["row 2, column G \"ST01\": no row: X in an ng/L row"];
+    assert_eq!(unpivoted.changes, expected);
+    let expected = vec![
+        "1 cell(s): X results in ng/L rows are not imported, as X is a Peak Area result. Are the units or the results wrong?",
+    ];
+    assert_eq!(unpivoted.questions, expected);
 }
 
 /// What is not clear yet is not imported, and asked about once per kind, with its cell count.
@@ -1522,13 +1539,13 @@ fn every_problem_is_reported_in_one_run_with_the_changes_and_questions() {
         .to_string();
     let _ = std::fs::remove_file(&xlsx);
 
-    assert_eq!(changes, Vec::<String>::new());
-    // Only "detected, not quantified", for row 2's 0.2
-    assert_eq!(questions.len(), 1, "{questions:?}");
-    let expected = "The sheet \"Sheet1\" has 2 result(s) that cannot be imported. Correct these cells in the source file and try again:
-  row 2, column G \"ST01\": 'X' in an ng/L row: X is a Peak Area result, so correct the Concentration units or the result
-  row 4, column G \"ST01\": '1.5' is not a whole number of items";
-    assert!(err.contains(expected), "{err}");
+    let expected = vec![
+        "row 2, column G \"ST01\": no row: X in an ng/L row",
+        "row 4, column G \"ST01\": no row: \"1.5\" is not a whole number of items",
+    ];
+    assert_eq!(changes, expected);
+    // X in ng/L, the 1.5 items, and "detected, not quantified" for row 2's 0.2
+    assert_eq!(questions.len(), 3, "{questions:?}");
     let expected = "The sheet \"Sheet1\" has 1 row(s) whose Identification Level is not 2A. Analytical results are always identification level 2A: correct these cells in the source file and try again:
   row 3: 1";
     assert!(err.contains(expected), "{err}");
