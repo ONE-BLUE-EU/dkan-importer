@@ -156,10 +156,6 @@ pub fn run<E: Environment, L: Write, O: Write, R: Write>(
         data_dictionary,
         ..
     } = reached?;
-    log.info(&format!(
-        "✅ Login accepted for user \"{}\"",
-        import.username
-    ))?;
     let data_dictionary = data_dictionary?;
     let json_schema = data_dictionary.to_json_schema()?;
     let title_to_name_mapping =

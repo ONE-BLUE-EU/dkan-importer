@@ -317,15 +317,13 @@ fn a_valid_sheet_is_uploaded_and_added_as_a_new_distribution() {
     assert_eq!(outcome.calls, expected);
     let expected_connections = vec![(BASE_URL.to_string(), "admin".to_string())];
     assert_eq!(outcome.connections, expected_connections);
-    let printed = "✅ Login accepted for user \"admin\"
-✅ Validation completed!
+    let printed = "✅ Validation completed!
 ✅ CSV file created: samples_ds-1.csv
 ✅ Successfully added CSV distribution 'samples_ds-1.csv' to dataset \"Samples dataset\" with id \"ds-1\"
 ";
     assert_eq!(outcome.stdout, printed);
     let logged = format!(
-        "{}✅ Login accepted for user \"admin\"
-No cell changed: every cell was taken as written.
+        "{}No cell changed: every cell was taken as written.
 ✅ Validation completed!
 ✅ CSV file created: samples_ds-1.csv
 ✅ Successfully added CSV distribution 'samples_ds-1.csv' to dataset \"Samples dataset\" with id \"ds-1\"
@@ -420,10 +418,7 @@ fn a_data_dictionary_that_cannot_be_read_stops_the_run_before_the_upload() {
         outcome.calls,
         vec![Call::CheckLogin, dataset_title(), data_dictionary()]
     );
-    let expected = format!(
-        "{}✅ Login accepted for user \"admin\"\n",
-        header(DATASET_TITLE, "(not read: DKAN refused the DataDictionary)")
-    );
+    let expected = header(DATASET_TITLE, "(not read: DKAN refused the DataDictionary)");
     assert_eq!(outcome.log, expected);
 }
 
@@ -626,7 +621,7 @@ fn a_dataset_name_that_cannot_be_read_is_explained_at_the_top_and_the_run_goes_o
 
     assert_eq!(outcome.error, None);
     let expected = format!(
-        "{}✅ Login accepted for user \"admin\"\n",
+        "{}No cell changed: every cell was taken as written.\n",
         header("(not read: DKAN refused the DatasetTitle)", "Samples")
     );
     assert!(outcome.log.starts_with(&expected), "{}", outcome.log);
