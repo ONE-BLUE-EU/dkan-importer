@@ -63,9 +63,10 @@ struct Args {
     /// must be data dictionary fields that are not columns in the sheet.
     ///
     /// The sheet holds analytical results: it must have an "Identification
-    /// Level" column before the sample columns, holding the number 2 in every
-    /// row with results. Any other value, text included, stops the run,
-    /// listing the rows to correct.
+    /// Level" column before the sample columns. In every row with results it
+    /// must hold a number, uploaded as written, or be blank, uploaded as 2.
+    /// Anything else, text included, stops the run, listing the rows to
+    /// correct.
     ///
     /// Example:
     ///   dkan-importer ... --sheet-name "Analytical results" \

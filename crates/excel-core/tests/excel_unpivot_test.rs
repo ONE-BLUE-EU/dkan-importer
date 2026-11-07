@@ -7,7 +7,7 @@ use common::Cell::{self, Empty, Error, FormulaText, Number, Text};
 use common::{create_simple_mapping, test_workbook};
 use excel_core::serde_json::json;
 use excel_core::{
-    DEFAULT_MARKER_LIMITS, DEFAULT_VALUES_MARKERS, ExcelValidatorBuilder, IDENTIFICATION_LEVEL,
+    DEFAULT_MARKER_LIMITS, DEFAULT_VALUES_MARKERS, ExcelValidatorBuilder,
     IDENTIFICATION_LEVEL_FIELD, MarkerLimit, Unpivot,
 };
 
@@ -1023,53 +1023,70 @@ fn a_sheet_without_the_identification_level_column_is_refused() {
     assert!(err.contains(expected), "{err}");
 }
 
+const LEVEL_COLUMNS: [&str; 4] = [
+    "Substance",
+    "Identification Level",
+    "Sample Tag",
+    "Concentration",
+];
+
+/// Any number, as the sheet's own level
 #[test]
-fn an_identification_level_of_the_number_2_is_kept_as_written() {
-    let rows = levels_sheet(vec![Number(IDENTIFICATION_LEVEL.into()), Number(2.0)]);
+fn an_identification_level_that_is_a_number_is_kept_as_written() {
+    let rows = levels_sheet(vec![Number(2.0), Number(1.0), Number(2.5)]);
 
     let unpivoted = run(&rows, spec()).unwrap();
 
-    let columns = [
-        "Substance",
-        "Identification Level",
-        "Sample Tag",
-        "Concentration",
+    let expected = vec![
+        "Substance,Identification Level,Sample Tag,Concentration",
+        "Okadaic acid,2,ST01,0.88",
+        "Okadaic acid,1,ST01,0.88",
+        "Okadaic acid,2.5,ST01,0.88",
     ];
+    assert_eq!(unpivoted.columns(&LEVEL_COLUMNS), expected);
+    assert_eq!(unpivoted.changes, Vec::<String>::new());
+}
+
+/// A blank level is taken as 2, and listed as a change; only in rows with results, the others
+/// giving no row
+#[test]
+fn a_blank_identification_level_is_filled_with_2_and_listed() {
+    let mut rows = levels_sheet(vec![Empty, Text("  "), Number(1.0)]);
+    rows.push(level_row(Empty, Empty));
+
+    let unpivoted = run(&rows, spec()).unwrap();
+
     let expected = vec![
         "Substance,Identification Level,Sample Tag,Concentration",
         "Okadaic acid,2,ST01,0.88",
         "Okadaic acid,2,ST01,0.88",
+        "Okadaic acid,1,ST01,0.88",
     ];
-    assert_eq!(unpivoted.columns(&columns), expected);
+    assert_eq!(unpivoted.columns(&LEVEL_COLUMNS), expected);
+    let expected = vec![
+        "row 2, column B \"Identification Level\": filled with \"2\": a blank Identification Level is taken as 2",
+        "row 3, column B \"Identification Level\": filled with \"2\": a blank Identification Level is taken as 2",
+    ];
+    assert_eq!(unpivoted.changes, expected);
 }
 
-/// Only the number 2: not text, even text reading 2, which Excel shows the same, and not 2A, the
-/// level the sheets used to hold
+/// Text is refused, even text reading 2, which Excel shows the same as the number
 #[test]
-fn rows_whose_identification_level_is_not_the_number_2_stop_the_run_listing_each() {
-    let mut rows = levels_sheet(vec![
-        Number(1.0),
-        Empty,
-        Text("2"),
-        Text("2A"),
-        Number(2.5),
-        Number(2.0),
-    ]);
+fn rows_whose_identification_level_is_not_a_number_stop_the_run_listing_each() {
+    let mut rows = levels_sheet(vec![Text("2"), Text("2A"), Number(2.0), Text("n/a")]);
     // A row without results gives no rows, so its identification level does not matter
     rows.push(level_row(Text("2A"), Empty));
     rows.push(level_row(Text("2A"), Text("NS")));
 
     let err = run(&rows, spec()).unwrap_err();
 
-    let expected = "The sheet \"Sheet1\" has 5 row(s) whose Identification Level is not the number 2. \
-Analytical results are always identification level 2: correct these cells in the source file and try again:
-  row 2: 1
-  row 3: blank
-  row 4: \"2\"
-  row 5: \"2A\"
-  row 6: 2.5";
+    let expected = "The sheet \"Sheet1\" has 3 row(s) whose Identification Level is not a number. \
+A blank one is taken as 2: correct these cells in the source file and try again:
+  row 2: \"2\"
+  row 3: \"2A\"
+  row 5: \"n/a\"";
     assert!(err.contains(expected), "{err}");
-    for row in ["row 7", "row 8", "row 9"] {
+    for row in ["row 4", "row 6", "row 7"] {
         assert!(!err.contains(row), "{err}");
     }
 }
@@ -1494,8 +1511,8 @@ fn every_problem_is_reported_in_one_run_with_the_changes_and_questions() {
             vec![Empty, Text("items"), Empty, Empty, Number(1.5), Number(2.0)],
         ],
     );
-    // Row 4's identification level is not 2
-    rows[3][1] = Number(1.0);
+    // Row 4's identification level is not a number
+    rows[3][1] = Text("2A");
     let mut validator = ExcelValidatorBuilder::new(test_workbook(&rows), "Sheet1", text_schema())
         .unpivot(spec())
         .build()
@@ -1522,8 +1539,8 @@ fn every_problem_is_reported_in_one_run_with_the_changes_and_questions() {
     assert_eq!(changes, expected);
     // X in ng/L, the 1.5 items, and "detected, not quantified" for row 2's 0.2
     assert_eq!(questions.len(), 3, "{questions:?}");
-    let expected = "The sheet \"Sheet1\" has 1 row(s) whose Identification Level is not the number 2. Analytical results are always identification level 2: correct these cells in the source file and try again:
-  row 4: 1";
+    let expected = "The sheet \"Sheet1\" has 1 row(s) whose Identification Level is not a number. A blank one is taken as 2: correct these cells in the source file and try again:
+  row 4: \"2A\"";
     assert!(err.contains(expected), "{err}");
     assert!(
         err.contains("has 1 ng/mL row(s) whose values no ng/L row holds"),
@@ -1741,8 +1758,8 @@ fn the_identification_level_of_an_ng_ml_row_is_not_checked() {
             vec![Empty, Text("ng/L"), Number(0.1), Number(0.25), Number(0.3)],
         ],
     );
-    rows[1][1] = Number(1.0);
-    rows[2][1] = Number(1.0);
+    rows[1][1] = Text("1");
+    rows[2][1] = Text("1");
 
     let run = run_ng_per_ml(&rows);
 
@@ -1753,9 +1770,9 @@ fn the_identification_level_of_an_ng_ml_row_is_not_checked() {
         .error
         .expect("row 3's identification level must stop the run");
     assert!(
-        error.contains("has 1 row(s) whose Identification Level is not the number 2"),
+        error.contains("has 1 row(s) whose Identification Level is not a number"),
         "{error}"
     );
-    assert!(error.contains("\n  row 3: 1"), "{error}");
-    assert!(!error.contains("\n  row 2: 1"), "{error}");
+    assert!(error.contains("\n  row 3: \"1\""), "{error}");
+    assert!(!error.contains("\n  row 2: "), "{error}");
 }

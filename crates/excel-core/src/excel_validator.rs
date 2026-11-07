@@ -60,6 +60,12 @@ pub enum Change {
         now: String,
         reason: String,
     },
+    /// A blank cell given `value`, and why
+    Filled {
+        cell: SheetCell,
+        value: String,
+        reason: String,
+    },
     /// A field of the result of the sample cell `cell` worked out by the importer, differing from
     /// the row's own value `was`
     Derived {
@@ -114,6 +120,11 @@ impl std::fmt::Display for Change {
                 cell,
                 reason: SkipReason::Open { reason, .. },
             } => write!(f, "{cell}: no row: {reason}"),
+            Change::Filled {
+                cell,
+                value,
+                reason,
+            } => write!(f, "{cell}: filled with \"{value}\": {reason}"),
             Change::Derived {
                 cell,
                 field,
@@ -855,18 +866,10 @@ const NO_SAMPLE_ALIAS: &str = "ND";
 /// it among its kept columns, holding [`IDENTIFICATION_LEVEL`] in every row with a result.
 pub const IDENTIFICATION_LEVEL_FIELD: &str = "Identification Level";
 
-/// The identification level of every analytical result, a number cell. Other values, text
-/// reading 2 included, are not rewritten: they stop the run, to be corrected in the source file.
+/// The identification level of an analytical result whose cell is blank. Any number is taken as
+/// written; anything else, text reading a number included, is not rewritten: it stops the run, to
+/// be corrected in the source file.
 pub const IDENTIFICATION_LEVEL: u8 = 2;
-
-/// Whether `cell` is the number [`IDENTIFICATION_LEVEL`]
-fn is_identification_level(cell: &Data) -> bool {
-    match cell {
-        Data::Int(n) => *n == i64::from(IDENTIFICATION_LEVEL),
-        Data::Float(n) => *n == f64::from(IDENTIFICATION_LEVEL),
-        _ => false,
-    }
-}
 
 /// Markers some sheets use for a meaning that already has a marker, and the marker to write
 /// instead, so that one meaning is written one way across datasets. They are refused, even
@@ -1709,8 +1712,25 @@ impl ExcelValidator {
                 .any(|(col_idx, _)| row.get(*col_idx).is_some_and(|cell| !is_no_result(cell)));
             match row.get(samples.identification_level) {
                 _ if !has_results => {}
-                Some(cell) if is_identification_level(cell) => {}
-                // Text in quotes, as text reading 2 looks like the number in Excel
+                Some(Data::Int(_) | Data::Float(_)) => {}
+                cell if cell.is_none_or(is_blank) => {
+                    let level = sheet_cell(samples.identification_level);
+                    if let Some(header) = &level.header {
+                        let value = self.convert_cell_to_json_with_schema_awareness(
+                            &Data::Float(f64::from(IDENTIFICATION_LEVEL)),
+                            header,
+                        );
+                        json_obj.insert(header.clone(), value);
+                    }
+                    changes.push(Change::Filled {
+                        cell: level,
+                        value: IDENTIFICATION_LEVEL.to_string(),
+                        reason: format!(
+                            "a blank {IDENTIFICATION_LEVEL_FIELD} is taken as {IDENTIFICATION_LEVEL}"
+                        ),
+                    });
+                }
+                // Text in quotes, as text reading a number looks like the number in Excel
                 cell => wrong_identification_levels.push(format!(
                     "row {}: {}",
                     row_number,
@@ -1875,11 +1895,10 @@ impl ExcelValidator {
 
         if !wrong_identification_levels.is_empty() {
             problems.push(format!(
-                "The sheet \"{}\" has {} row(s) whose {} is not the number {}. Analytical results are always identification level {}: correct these cells in the source file and try again:\n  {}",
+                "The sheet \"{}\" has {} row(s) whose {} is not a number. A blank one is taken as {}: correct these cells in the source file and try again:\n  {}",
                 self.sheet_name,
                 wrong_identification_levels.len(),
                 IDENTIFICATION_LEVEL_FIELD,
-                IDENTIFICATION_LEVEL,
                 IDENTIFICATION_LEVEL,
                 wrong_identification_levels.join("\n  ")
             ));
@@ -2162,10 +2181,9 @@ impl ExcelValidator {
         let Some(&(identification_level, _)) = kept.iter().find(|(_, name)| *name == level_field)
         else {
             return Err(anyhow::anyhow!(
-                "Cannot unpivot the sheet \"{}\": it has no \"{}\" column before the sample columns. Analytical results are always identification level {}.",
+                "Cannot unpivot the sheet \"{}\": it has no \"{}\" column before the sample columns.",
                 self.sheet_name,
-                level_field,
-                IDENTIFICATION_LEVEL
+                level_field
             ));
         };
 
