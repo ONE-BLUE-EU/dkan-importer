@@ -7,7 +7,7 @@ use clap::Parser;
 use dkan_importer::{
     dkan::{HttpDkan, HttpsUrl},
     error_log::{ERRORS_LOG_FILE, append_error_to_log},
-    import::{Environment, Import, run},
+    import::{Environment, Import, SheetNames, run},
     run_log::RunLog,
     utils::RunFiles,
 };
@@ -38,9 +38,16 @@ struct Args {
     #[arg(long)]
     data_dictionary_id: String,
 
-    /// Optional sheet name to validate (if not specified, validates Sheet1)
-    #[arg(long, default_value = "Sheet1")]
-    sheet_name: String,
+    /// The sheet to import (Sheet1 if not given). Give it more than once to merge several
+    /// sheets with the same columns into one CSV file, in the order given; each is read and
+    /// validated on its own, and nothing is uploaded unless every one is accepted.
+    ///
+    /// Example, merging the analytical results of two matrices:
+    ///   dkan-importer ... --unpivot --headers-column "Sample Tag" \
+    ///     --sheet-name "Analytical results (Air)" \
+    ///     --sheet-name "Analytical results (Sediment)"
+    #[arg(long, default_value = "Sheet1", verbatim_doc_comment)]
+    sheet_name: Vec<String>,
 
     /// The username for the remote API authentication.
     #[arg(long)]
@@ -208,7 +215,14 @@ struct Args {
 
 fn main() -> ExitCode {
     let arguments = Args::parse();
-    let files = RunFiles::now(&arguments.dataset_id, &arguments.sheet_name);
+    let sheet_names = match SheetNames::new(arguments.sheet_name) {
+        Ok(sheet_names) => sheet_names,
+        Err(e) => {
+            eprintln!("❌ {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let files = RunFiles::now(&arguments.dataset_id, &sheet_names);
     let unpivot = match (arguments.unpivot, arguments.headers_column) {
         (true, Some(headers_column)) => Some(Unpivot {
             headers_column,
@@ -225,7 +239,7 @@ fn main() -> ExitCode {
     };
     let import = Import {
         excel_file: arguments.excel_file,
-        sheet_name: arguments.sheet_name,
+        sheet_names,
         data_dictionary_id: arguments.data_dictionary_id,
         dataset_id: arguments.dataset_id,
         base_url: arguments.base_url,

@@ -77,11 +77,26 @@ pub enum Cell {
 /// The bytes of a new .xlsx workbook with `rows` (the first row being the headers) in a sheet named
 /// "Sheet1". Nothing is written to disk.
 pub fn test_workbook(rows: &[Vec<Cell>]) -> Vec<u8> {
-    use rust_xlsxwriter::{Formula, Workbook};
+    test_workbook_with_sheets(&[("Sheet1", rows)])
+}
+
+/// The bytes of a new .xlsx workbook with one sheet per `(name, rows)`, in that order, the first
+/// row of each being its headers. Nothing is written to disk.
+pub fn test_workbook_with_sheets(sheets: &[(&str, &[Vec<Cell>])]) -> Vec<u8> {
+    use rust_xlsxwriter::Workbook;
 
     let mut workbook = Workbook::new();
+    for (name, rows) in sheets {
+        write_sheet(&mut workbook, name, rows);
+    }
+    workbook.save_to_buffer().unwrap()
+}
+
+fn write_sheet(workbook: &mut rust_xlsxwriter::Workbook, name: &str, rows: &[Vec<Cell>]) {
+    use rust_xlsxwriter::Formula;
+
     let worksheet = workbook.add_worksheet();
-    worksheet.set_name("Sheet1").unwrap();
+    worksheet.set_name(name).unwrap();
     // A formula with an empty result is stored as `t="str"` and `<v></v>`, as Excel does, not as
     // the writer's default result of 0
     worksheet.set_formula_result_default("");
@@ -109,5 +124,4 @@ pub fn test_workbook(rows: &[Vec<Cell>]) -> Vec<u8> {
             }
         }
     }
-    workbook.save_to_buffer().unwrap()
 }

@@ -1367,13 +1367,29 @@ impl ExcelValidator {
     /// The CSV of the rows, with schema-aware parsing, headed by the dictionary names that
     /// `title_to_name_mapping` gives the titles
     pub fn to_csv(&self, title_to_name_mapping: &HashMap<String, String>) -> Result<Vec<u8>> {
+        Self::merged_csv(std::slice::from_ref(self), title_to_name_mapping)
+    }
+
+    /// The CSV of the rows of `sheets`, one sheet after the other in the order given, as
+    /// [`ExcelValidator::to_csv`] writes each: headed once, by the dictionary names that
+    /// `title_to_name_mapping` gives the titles. Refused unless every sheet has the same columns,
+    /// in the same order, and there is a sheet.
+    pub fn merged_csv(
+        sheets: &[ExcelValidator],
+        title_to_name_mapping: &HashMap<String, String>,
+    ) -> Result<Vec<u8>> {
+        Self::check_same_columns(sheets)?;
+        let Some(first) = sheets.first() else {
+            return Err(anyhow::anyhow!("No sheets to merge."));
+        };
+
         // Configure CSV writer to quote fields when necessary (e.g., when they contain commas)
         let mut wtr = csv::WriterBuilder::new()
             .quote_style(csv::QuoteStyle::Necessary)
             .from_writer(Vec::new());
 
         // Map Excel headers (titles) to dictionary names for CSV output
-        let csv_headers: Vec<String> = self
+        let csv_headers: Vec<String> = first
             .headers
             .iter()
             .map(|title| {
@@ -1387,66 +1403,92 @@ impl ExcelValidator {
         // Write headers using dictionary names - no manual escaping needed, csv writer handles it
         wtr.write_record(&csv_headers)?;
 
-        // Write data rows
-        for (_row_number, json_obj) in &self.rows {
-            // Convert parsed JSON values back to CSV record
-            let mut csv_record: Vec<String> = Vec::new();
-            for header in &self.headers {
-                if let Some(parsed_value) = json_obj.get(header) {
-                    // Convert the JSON value to a string for CSV
-                    let csv_value = match parsed_value {
-                        Value::String(s) => s.clone(),
-                        Value::Number(n) => n.to_string(),
-                        Value::Bool(b) => b.to_string(),
-                        Value::Null => {
-                            // Numeric columns get a type placeholder - see NUMERIC_PLACEHOLDER.
-                            // Look up field schema using the original Excel header (title)
-                            if let Some(field_schema) = self.field_schemas.get(header) {
-                                match &field_schema.field_type {
-                                    SchemaType::Number => NUMERIC_PLACEHOLDER.to_string(),
-                                    SchemaType::Integer => INTEGER_PLACEHOLDER.to_string(),
-                                    SchemaType::Mixed(types) => {
-                                        // For mixed types (like [Number, Null]), check if it contains Number or Integer
-                                        if types.iter().any(|t| matches!(t, SchemaType::Number)) {
-                                            NUMERIC_PLACEHOLDER.to_string()
-                                        } else if types
-                                            .iter()
-                                            .any(|t| matches!(t, SchemaType::Integer))
-                                        {
-                                            INTEGER_PLACEHOLDER.to_string()
-                                        } else {
-                                            String::new()
-                                        }
-                                    }
-                                    _ => String::new(),
-                                }
-                            } else {
-                                String::new()
-                            }
-                        }
-                        Value::Array(arr) => {
-                            // Convert arrays to semicolon-separated strings (safer than commas)
-                            arr.iter()
-                                .map(|v| match v {
-                                    Value::String(s) => s.clone(),
-                                    other => other.to_string().trim_matches('"').to_string(),
-                                })
-                                .collect::<Vec<_>>()
-                                .join(";")
-                        }
-                        Value::Object(_) => parsed_value.to_string(),
-                    };
-                    csv_record.push(csv_value);
-                } else {
-                    csv_record.push(String::new());
-                }
+        for sheet in sheets {
+            for (_row_number, json_obj) in &sheet.rows {
+                wtr.write_record(sheet.csv_record(json_obj))?;
             }
-
-            wtr.write_record(&csv_record)?;
         }
 
         wtr.into_inner()
             .map_err(|e| anyhow::anyhow!("Cannot write the CSV: {}", e.error()))
+    }
+
+    /// Refused, naming the first sheet that differs, unless every sheet of `sheets` has the same
+    /// columns, in the same order, as the first: only such sheets can be merged; see
+    /// [`ExcelValidator::merged_csv`]. Also refused when there is no sheet.
+    pub fn check_same_columns(sheets: &[ExcelValidator]) -> Result<()> {
+        let Some((first, rest)) = sheets.split_first() else {
+            return Err(anyhow::anyhow!("No sheets to merge."));
+        };
+        match rest.iter().find(|sheet| sheet.headers != first.headers) {
+            None => Ok(()),
+            Some(different) => Err(anyhow::anyhow!(
+                "The sheet \"{}\" has the columns {}, but the sheet \"{}\" has {}: only sheets with the same columns, in the same order, can be merged.",
+                different.sheet_name,
+                different.headers.join(", "),
+                first.sheet_name,
+                first.headers.join(", ")
+            )),
+        }
+    }
+
+    /// The name of the sheet read
+    pub fn sheet_name(&self) -> &str {
+        &self.sheet_name
+    }
+
+    /// The CSV record of a parsed row: one value per header, in header order
+    fn csv_record(&self, json_obj: &Map<String, Value>) -> Vec<String> {
+        let mut csv_record: Vec<String> = Vec::new();
+        for header in &self.headers {
+            if let Some(parsed_value) = json_obj.get(header) {
+                // Convert the JSON value to a string for CSV
+                let csv_value = match parsed_value {
+                    Value::String(s) => s.clone(),
+                    Value::Number(n) => n.to_string(),
+                    Value::Bool(b) => b.to_string(),
+                    Value::Null => {
+                        // Numeric columns get a type placeholder - see NUMERIC_PLACEHOLDER.
+                        // Look up field schema using the original Excel header (title)
+                        if let Some(field_schema) = self.field_schemas.get(header) {
+                            match &field_schema.field_type {
+                                SchemaType::Number => NUMERIC_PLACEHOLDER.to_string(),
+                                SchemaType::Integer => INTEGER_PLACEHOLDER.to_string(),
+                                SchemaType::Mixed(types) => {
+                                    // For mixed types (like [Number, Null]), check if it contains Number or Integer
+                                    if types.iter().any(|t| matches!(t, SchemaType::Number)) {
+                                        NUMERIC_PLACEHOLDER.to_string()
+                                    } else if types.iter().any(|t| matches!(t, SchemaType::Integer))
+                                    {
+                                        INTEGER_PLACEHOLDER.to_string()
+                                    } else {
+                                        String::new()
+                                    }
+                                }
+                                _ => String::new(),
+                            }
+                        } else {
+                            String::new()
+                        }
+                    }
+                    Value::Array(arr) => {
+                        // Convert arrays to semicolon-separated strings (safer than commas)
+                        arr.iter()
+                            .map(|v| match v {
+                                Value::String(s) => s.clone(),
+                                other => other.to_string().trim_matches('"').to_string(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(";")
+                    }
+                    Value::Object(_) => parsed_value.to_string(),
+                };
+                csv_record.push(csv_value);
+            } else {
+                csv_record.push(String::new());
+            }
+        }
+        csv_record
     }
 
     //////////////////////////////////////////////////////////////

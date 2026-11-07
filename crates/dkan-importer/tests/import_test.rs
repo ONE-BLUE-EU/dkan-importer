@@ -1,13 +1,13 @@
 //! Whole imports against a fake DKAN and a fake environment: no network, no files, no terminal.
 
 use dkan_importer::dkan::{DistributionAdded, Dkan, HttpsUrl, NewDistribution};
-use dkan_importer::import::{Environment, Import, VALIDATION_REPORT_TITLE, run};
+use dkan_importer::import::{Environment, Import, SheetNames, VALIDATION_REPORT_TITLE, run};
 use dkan_importer::model::DataDictionary;
 use dkan_importer::run_log::RunLog;
 use excel_core::anyhow::{self, Result};
 use excel_core::serde_json::{Value, json};
 use excel_core::test_utils::Cell::{Empty, Number, Text};
-use excel_core::test_utils::{Cell, test_workbook};
+use excel_core::test_utils::{Cell, test_workbook, test_workbook_with_sheets};
 use excel_core::{DEFAULT_MARKER_LIMITS, DEFAULT_VALUES_MARKERS, Unpivot};
 use std::cell::RefCell;
 use std::io;
@@ -216,7 +216,7 @@ const VALID_CSV: &str = "sample_id,depth\nS1,1.5\nS2,000000000000.000000\n";
 fn import() -> Import {
     Import {
         excel_file: "samples.xlsx".to_string(),
-        sheet_name: "Sheet1".to_string(),
+        sheet_names: sheet_names(&["Sheet1"]),
         data_dictionary_id: "dd-1".to_string(),
         dataset_id: "ds-1".to_string(),
         base_url: BASE_URL.to_string(),
@@ -225,6 +225,10 @@ fn import() -> Import {
         unpivot: None,
         extra_columns_to: None,
     }
+}
+
+fn sheet_names(names: &[&str]) -> SheetNames {
+    SheetNames::new(names.iter().map(|name| name.to_string()).collect()).unwrap()
 }
 
 fn environment(excel: Vec<u8>, dkan: FakeDkan) -> FakeEnvironment {
@@ -800,4 +804,176 @@ Q1 (1 cell): Results between the Limit of detection and the Limit of quantificat
     assert!(outcome.stdout.contains(questions), "{}", outcome.stdout);
     assert!(outcome.log.contains(questions), "{}", outcome.log);
     assert!(!outcome.log.contains("see the run log"), "{}", outcome.log);
+}
+
+/// A workbook with sample sheets "Water", "Air" and "Reordered", whose columns are in another
+/// order; with an invalid Depth in Water's row 3 and Air's row 2 when `invalid`
+fn samples_workbook(invalid: bool) -> Vec<u8> {
+    let headers = || vec![Text("Sample ID"), Text("Depth")];
+    let depth = |value: f64| if invalid { Text("deep") } else { Number(value) };
+    let water = [
+        headers(),
+        vec![Text("W1"), Number(1.5)],
+        vec![Text("W2"), depth(2.0)],
+    ];
+    let air = [headers(), vec![Text("A1"), depth(0.5)]];
+    let reordered = [
+        vec![Text("Depth"), Text("Sample ID")],
+        vec![Text("deep"), Text("R1")],
+    ];
+    test_workbook_with_sheets(&[("Water", &water), ("Air", &air), ("Reordered", &reordered)])
+}
+
+fn merging(names: &[&str]) -> Import {
+    let mut import = import();
+    import.sheet_names = sheet_names(names);
+    import
+}
+
+#[test]
+fn several_sheets_are_merged_into_one_csv_file_in_the_order_given() {
+    let outcome = run_import(
+        &merging(&["Air", "Water"]),
+        environment(samples_workbook(false), dkan(None, None)),
+    );
+
+    assert_eq!(outcome.error, None);
+    let csv = "sample_id,depth\nA1,0.5\nW1,1.5\nW2,2\n";
+    let expected = vec![(CSV_FILE_NAME.to_string(), csv.to_string())];
+    assert_eq!(outcome.saved_csv, expected);
+    let expected = Call::Upload {
+        file_name: CSV_FILE_NAME.to_string(),
+        csv: csv.to_string(),
+    };
+    assert_eq!(outcome.calls.get(3), Some(&expected));
+    let printed = "Sheet \"Air\":
+Sheet \"Water\":
+✅ Merging 2 sheets into one CSV file: 3 row(s)
+✅ Validation completed!
+";
+    assert!(outcome.stdout.starts_with(printed), "{}", outcome.stdout);
+    let logged = "Excel file: samples.xlsx
+Excel sheet: Air
+Excel sheet: Water
+Dataset Name: Samples dataset
+Dataset ID: ds-1
+Dictionary Name: Samples
+Dictionary ID: dd-1
+
+
+Sheet \"Air\":
+Every cell was imported as written.
+Sheet \"Water\":
+Every cell was imported as written.
+✅ Merging 2 sheets into one CSV file: 3 row(s)
+";
+    assert!(outcome.log.starts_with(logged), "{}", outcome.log);
+    assert!(
+        outcome
+            .log
+            .contains("✅ CSV file saved: samples_ds-1.csv (3 row(s))\n"),
+        "{}",
+        outcome.log
+    );
+}
+
+/// One run lists all there is to correct: every sheet is validated before the run stops
+#[test]
+fn every_sheet_refused_is_reported_and_nothing_is_uploaded() {
+    let outcome = run_import(
+        &merging(&["Water", "Air"]),
+        environment(samples_workbook(true), dkan(None, None)),
+    );
+
+    let expected = "Sheet \"Water\": Excel validation failed with 1 error(s) across 1 row(s). Check the error log for details.
+Sheet \"Air\": Excel validation failed with 1 error(s) across 1 row(s). Check the error log for details.";
+    assert_eq!(outcome.error.as_deref(), Some(expected));
+    let titles: Vec<&str> = outcome
+        .error_log
+        .iter()
+        .map(|(title, _)| title.as_str())
+        .collect();
+    let expected = vec![
+        "Excel Validation Error Report: sheet \"Water\"",
+        "Excel Validation Error Report: sheet \"Air\"",
+    ];
+    assert_eq!(titles, expected);
+    let reports: Vec<&str> = outcome
+        .error_log
+        .iter()
+        .map(|(_, report)| report.as_str())
+        .collect();
+    assert!(reports[0].contains("Row 3: 1 error(s)\n"), "{reports:?}");
+    assert!(reports[1].contains("Row 2: 1 error(s)\n"), "{reports:?}");
+    assert_eq!(
+        outcome.calls,
+        vec![Call::CheckLogin, dataset_title(), data_dictionary()]
+    );
+    assert!(outcome.saved_csv.is_empty());
+    assert!(outcome.log.ends_with(&nothing_done()), "{}", outcome.log);
+}
+
+/// One valid sheet among refused ones is not uploaded alone
+#[test]
+fn a_valid_sheet_is_not_uploaded_when_another_is_refused() {
+    let mut workbook_import = merging(&["Water", "Air"]);
+    workbook_import.sheet_names = sheet_names(&["Sheet1", "Air"]);
+    let invalid = [
+        vec![Text("Sample ID"), Text("Depth")],
+        vec![Text("A1"), Text("deep")],
+    ];
+    let valid = [
+        vec![Text("Sample ID"), Text("Depth")],
+        vec![Text("S1"), Number(1.0)],
+    ];
+    let workbook = test_workbook_with_sheets(&[("Sheet1", &valid), ("Air", &invalid)]);
+
+    let outcome = run_import(&workbook_import, environment(workbook, dkan(None, None)));
+
+    let expected = "Sheet \"Air\": Excel validation failed with 1 error(s) across 1 row(s). Check the error log for details.";
+    assert_eq!(outcome.error.as_deref(), Some(expected));
+    assert_eq!(
+        outcome.calls,
+        vec![Call::CheckLogin, dataset_title(), data_dictionary()]
+    );
+    assert!(outcome.saved_csv.is_empty());
+}
+
+/// Before validating: the rows of sheets that cannot be merged are not worth correcting yet
+#[test]
+fn sheets_whose_columns_differ_stop_the_run_before_validation() {
+    let outcome = run_import(
+        &merging(&["Water", "Reordered"]),
+        environment(samples_workbook(false), dkan(None, None)),
+    );
+
+    let expected = "The sheet \"Reordered\" has the columns Depth, Sample ID, but the sheet \"Water\" has Sample ID, Depth: only sheets with the same columns, in the same order, can be merged.";
+    assert_eq!(outcome.error.as_deref(), Some(expected));
+    // Reordered's Depth "deep" would fail validation
+    assert!(outcome.error_log.is_empty(), "{:?}", outcome.error_log);
+    assert!(
+        !outcome.log.contains("Validation completed"),
+        "{}",
+        outcome.log
+    );
+    assert_eq!(
+        outcome.calls,
+        vec![Call::CheckLogin, dataset_title(), data_dictionary()]
+    );
+}
+
+#[test]
+fn a_missing_sheet_among_those_given_stops_the_run_before_the_upload() {
+    let outcome = run_import(
+        &merging(&["Water", "Soil"]),
+        environment(samples_workbook(false), dkan(None, None)),
+    );
+
+    let error = outcome.error.expect("the missing sheet must stop the run");
+    assert!(error.contains("Soil"), "{error}");
+    assert_eq!(
+        outcome.calls,
+        vec![Call::CheckLogin, dataset_title(), data_dictionary()]
+    );
+    assert!(outcome.saved_csv.is_empty());
 }

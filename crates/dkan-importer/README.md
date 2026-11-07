@@ -52,7 +52,7 @@ cargo run -- --base-url https://dkan.example.com --excel-file ./data/sample-data
 - **`--username`** (required) - Username for DKAN API authentication
 - **`--password`** (optional) - Password for authentication (will be prompted if not provided)
 - **`--dataset-id`** (required) - UUID of the existing DKAN dataset to add the CSV as a distribution
-- **`--sheet-name`** (optional) - Name of the Excel sheet to process (defaults to "Sheet1")
+- **`--sheet-name`** (optional) - Name of the Excel sheet to process (defaults to "Sheet1"). Give it more than once to merge several sheets into one CSV file. See [Merging several sheets](#merging-several-sheets)
 - **`--unpivot`** (optional) - Unpivot the sheet: one row per sample cell. Requires `--headers-column`. See [Unpivoting a wide sheet](#unpivoting-a-wide-sheet)
 - **`--headers-column`** (with `--unpivot` only) - The data dictionary field that receives each sample column's header
 - **`--values-column`** (with `--unpivot` only) - The data dictionary field that receives each sample cell's value (defaults to "Concentration")
@@ -192,6 +192,26 @@ ST01-b     | {"Remark 3":"Super dirty","Slice num":2}
 - Data in a column without a header is still refused.
 - Before validating, it prints what it will do, for example: `Moving 2 extra column(s) into Remark 3: column C "Slice num", column D "DNA (Yes/No)"; 2 row(s) have extra data.`
 
+### Merging several sheets
+
+Some workbooks split one kind of data over several sheets, for example the analytical results of each matrix: "Analytical results (column wate", "Analytical results (Air)", "Analytical results (Sediment)", ... Give `--sheet-name` once for each sheet to upload them together, as one CSV file and one distribution:
+
+```bash
+dkan-importer ... --unpivot --headers-column "Sample Tag" \
+  --sheet-name "Analytical results (column wate" \
+  --sheet-name "Analytical results (Air)" \
+  --sheet-name "Analytical results (Sediment)"
+```
+
+- Each sheet is read, unpivoted and validated on its own, exactly as if it were imported alone: its run log lines name its own rows and columns, and an ng/mL row is only matched with an ng/L row of the same sheet. In the output and the run log, each sheet's lines come under `Sheet "<name>":`.
+- The CSV file then holds the rows of every sheet, one sheet after the other in the order given, under one header row.
+- Every sheet must have the same columns, in the same order, once read (for an unpivoted sheet: the same leading columns; the sample columns may differ). Otherwise the run stops, before validating any rows, naming the first sheet that differs and both lists of columns.
+- Every sheet is validated before the run stops, so one run lists everything to correct. Each sheet refused gets a line in the error, as in `Sheet "Analytical results (Air)": Excel validation failed with 1 error(s) across 1 row(s). Check the error log for details.`, and its own entry in the error log, titled `Excel Validation Error Report: sheet "<name>"`. Nothing is uploaded unless every sheet is accepted.
+- A sheet given twice stops the run before it starts.
+- The top of the run log has one `Excel sheet:` line for each sheet, in the order given.
+- Before validating, it prints how many rows the merge holds: `✅ Merging 3 sheets into one CSV file: 1234 row(s)`.
+- The CSV file and the run log are named after the merge; see [CSV Output](#csv-output).
+
 ## DKAN Data Dictionary Format
 
 The application fetches data dictionaries from DKAN using the metastore API:
@@ -263,7 +283,7 @@ Example Excel structure:
   The CSV file is saved in the current directory, beside the run log, before it is uploaded under the same name, so the file sent is kept even when the upload fails. A run that stops ends instead with `❌ CSV file not generated` and `❌ Nothing uploaded`; one that stops later says how far it got: the CSV generated but not saved (`❌ CSV file generated (3312 row(s)), but not saved as ...`, and nothing uploaded), saved but not uploaded (`❌ Nothing uploaded`), uploaded to its URL but not added to the dataset (`❌ Uploaded ... to <url>, but not added to dataset ...`), or added in place of a distribution whose file could not be deleted (`⚠️  Uploaded ..., replacing old.csv, whose file could not be deleted`). When it replaces one, the line says so: `..., replacing old.csv, whose file was deleted`.
 
 ### Run Log File
-Every run writes a log in the current directory, named exactly like the run's CSV file but ending in `.run.log`: `<sheet>_<YYYY-MM-DD_HH-MM-SS>_<dataset>.run.log`, lowercase, with the sheet name's spaces as `_`, as in `analytical_results_(i)_2026-11-05_10-00-00_some-dataset.run.log`. Each run writes its own log; the newest describes the latest run. It is written even when the run stops, and never contains the password. It holds:
+Every run writes a log in the current directory, named exactly like the run's CSV file but ending in `.run.log`: `<sheet>_<YYYY-MM-DD_HH-MM-SS>_<dataset>.run.log`, lowercase, with the sheet name's spaces as `_`, as in `analytical_results_(i)_2026-11-05_10-00-00_some-dataset.run.log` (for a merge, see [CSV Output](#csv-output)). Each run writes its own log; the newest describes the latest run. It is written even when the run stops, and never contains the password. It holds:
 - First, what the run was given, with the dataset's and the data dictionary's names (their titles in DKAN, read once the login is accepted), then two blank lines:
 
   ```
@@ -325,6 +345,11 @@ Errors:
 Valid data is saved to a CSV file in the current directory, beside the run log, and uploaded under the same name:
 ```
 <sheet>_<YYYY-MM-DD_HH-MM-SS>_<dataset>.csv
+```
+
+A run merging `n` sheets has `<words>_<n>_merged` in place of `<sheet>`, `<words>` being the whole words every sheet name starts with (left out if there are none). Merging "Analytical results (Air)" and "Analytical results (Sediment)" gives:
+```
+analytical_results_2_merged_<YYYY-MM-DD_HH-MM-SS>_<dataset>.csv
 ```
 
 ## Authentication

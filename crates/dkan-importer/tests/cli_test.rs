@@ -350,6 +350,67 @@ Dictionary ID: some-id
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `--sheet-name` given more than once merges the sheets: the run log is named by the words the
+/// sheet names share and how many there are, and lists every sheet
+#[test]
+fn a_repeated_sheet_name_names_the_run_log_after_the_merge() {
+    let dir = new_run_dir("run-log-merged");
+
+    let output = run_in(
+        &dir,
+        &[
+            "--sheet-name",
+            "Analytical results (Air)",
+            "--sheet-name",
+            "Analytical results (Sediment)",
+        ],
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let expected_exit_code = Some(1);
+    assert_eq!(output.status.code(), expected_exit_code, "{stderr}");
+    let log_path = the_run_log_in(&dir);
+    let name = log_path.file_name().unwrap().to_string_lossy().to_string();
+    let timestamp = name
+        .strip_prefix("analytical_results_2_merged_")
+        .and_then(|rest| rest.strip_suffix("_some-dataset.run.log"))
+        .unwrap_or_else(|| panic!("unexpected run log name {name}"));
+    assert_eq!(timestamp.len(), "2026-11-05_10-00-00".len(), "{name}");
+    let log = std::fs::read_to_string(&log_path).unwrap();
+    let sheets = "Excel file: unused.xlsx
+Excel sheet: Analytical results (Air)
+Excel sheet: Analytical results (Sediment)
+Dataset Name: ";
+    assert!(log.starts_with(sheets), "{log}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Refused before the run log is created or DKAN is reached: its rows would be uploaded twice
+#[test]
+fn a_sheet_name_given_twice_is_refused() {
+    let dir = new_run_dir("sheet-twice");
+
+    let output = run_in(&dir, &["--sheet-name", "Air", "--sheet-name", "Air"]);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let expected_exit_code = Some(1);
+    assert_eq!(output.status.code(), expected_exit_code, "{stderr}");
+    assert_eq!(stderr, "❌ The sheet \"Air\" is given more than once.\n");
+    let logs = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter(|entry| {
+            entry
+                .as_ref()
+                .unwrap()
+                .path()
+                .to_string_lossy()
+                .ends_with(".run.log")
+        })
+        .count();
+    assert_eq!(logs, 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The one run log a run wrote in `dir`
 fn the_run_log_in(dir: &Path) -> PathBuf {
     let logs: Vec<PathBuf> = std::fs::read_dir(dir)

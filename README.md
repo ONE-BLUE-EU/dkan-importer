@@ -23,7 +23,7 @@ cargo run -r -p dkan-importer -- \
   --username admin
 ```
 
-See [crates/dkan-importer/README.md](crates/dkan-importer/README.md) for all options, the data dictionary type mapping, and the output formats.
+Give `--sheet-name` more than once to merge several sheets (for example the analytical results of each matrix) into one CSV file and distribution. See [crates/dkan-importer/README.md](crates/dkan-importer/README.md) for all options, the data dictionary type mapping, and the output formats.
 
 ### `upr` (unpivoter)
 

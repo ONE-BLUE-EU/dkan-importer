@@ -6,18 +6,59 @@ use crate::dkan::{Dkan, HttpsUrl, NewDistribution};
 use crate::model::DataDictionary;
 use crate::run_log::{RunLog, changes_lines, ng_per_ml_rows_lines, questions_lines};
 use excel_core::anyhow::Result;
-use excel_core::{ExcelValidatorBuilder, Unpivot};
+use excel_core::{ExcelValidator, ExcelValidatorBuilder, RowsRefused, Unpivot};
+use std::collections::HashSet;
 use std::io::{self, Write};
 
 /// The heading of the validation report in the error log
 pub const VALIDATION_REPORT_TITLE: &str = "Excel Validation Error Report";
+
+/// The sheets an import reads, in the order given: at least one, and none twice. Several are
+/// merged into one CSV file, each read and validated on its own.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SheetNames {
+    first: String,
+    rest: Vec<String>,
+}
+
+impl SheetNames {
+    /// Refused when `names` is empty or names a sheet more than once
+    pub fn new(names: Vec<String>) -> std::result::Result<Self, String> {
+        let mut seen = HashSet::new();
+        if let Some(twice) = names.iter().find(|name| !seen.insert(name.as_str())) {
+            return Err(format!("The sheet \"{twice}\" is given more than once."));
+        }
+        let mut names = names.into_iter();
+        let Some(first) = names.next() else {
+            return Err("No sheet given.".to_string());
+        };
+        Ok(SheetNames {
+            first,
+            rest: names.collect(),
+        })
+    }
+
+    pub fn first(&self) -> &str {
+        &self.first
+    }
+
+    /// Every sheet, in the order given
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.first.as_str()).chain(self.rest.iter().map(String::as_str))
+    }
+
+    /// How many sheets are merged, when more than one is given
+    pub fn merged(&self) -> Option<usize> {
+        (!self.rest.is_empty()).then(|| self.rest.len().saturating_add(1))
+    }
+}
 
 /// What an import is given. Never a credential: those stay with the [`Environment`].
 #[derive(Debug, Clone)]
 pub struct Import {
     /// The path of the Excel file, as given
     pub excel_file: String,
-    pub sheet_name: String,
+    pub sheet_names: SheetNames,
     pub data_dictionary_id: String,
     pub dataset_id: String,
     /// The DKAN base URL, as given: refused unless https, before anything else is done
@@ -79,19 +120,25 @@ fn file_name(path: &str) -> &str {
         .unwrap_or(path)
 }
 
-/// The top of the run log: the file and sheet, then the dataset and the data dictionary, each with
-/// its name, then two blank lines
-fn header(import: &Import, dataset_name: &Name, dictionary_name: &Name) -> [String; 8] {
-    [
-        format!("Excel file: {}", file_name(&import.excel_file)),
-        format!("Excel sheet: {}", import.sheet_name),
+/// The top of the run log: the file and each sheet, then the dataset and the data dictionary,
+/// each with its name, then two blank lines
+fn header(import: &Import, dataset_name: &Name, dictionary_name: &Name) -> Vec<String> {
+    let mut lines = vec![format!("Excel file: {}", file_name(&import.excel_file))];
+    lines.extend(
+        import
+            .sheet_names
+            .iter()
+            .map(|sheet| format!("Excel sheet: {sheet}")),
+    );
+    lines.extend([
         format!("Dataset Name: {dataset_name}"),
         format!("Dataset ID: {}", import.dataset_id),
         format!("Dictionary Name: {dictionary_name}"),
         format!("Dictionary ID: {}", import.data_dictionary_id),
         String::new(),
         String::new(),
-    ]
+    ]);
+    lines
 }
 
 /// The steps before the top of the run log can name the dataset and the data dictionary; they
@@ -261,50 +308,61 @@ fn steps<E: Environment, L: Write, O: Write, R: Write>(
     let title_to_name_mapping =
         DataDictionary::create_title_to_name_mapping(&data_dictionary.fields)?;
 
-    let mut builder = ExcelValidatorBuilder::new(workbook, &import.sheet_name, json_schema);
-    if let Some(unpivot) = &import.unpivot {
-        builder = builder.unpivot(unpivot.clone());
-    }
-    if let Some(field) = &import.extra_columns_to {
-        builder = builder.extra_columns_to(field);
-    }
-    let mut validator = builder.build()?;
-    if let Some(summary) = validator.error_cells_summary() {
-        log.info(&format!("⚠️  {summary}"))?;
-    }
-    if let Some(summary) = validator.unpivot_summary() {
-        log.info(&format!("✅ {summary}"))?;
-    }
-    if let Some(summary) = validator.extra_columns_summary() {
-        log.info(&format!("✅ {summary}"))?;
-    }
-    log.notes(&ng_per_ml_rows_lines(validator.ng_per_ml_rows()))?;
-    log.notes(&changes_lines(&validator.change_lines()))?;
-    // Printed as well as logged: the data owners have to answer them
-    for line in questions_lines(validator.questions()) {
-        log.info(&line)?;
-    }
-    if let Err(refused) = validator.validate_excel() {
-        let mut message = refused.to_string();
-        if let Some(invalid) = &refused.invalid_rows {
-            // If the log cannot be written, carry the details in the error itself rather than
-            // pointing the user at a log that lacks them
-            match environment.append_error_log(VALIDATION_REPORT_TITLE, &invalid.report) {
-                Ok(()) => message.push_str(" Check the error log for details."),
-                Err(e) => message.push_str(&format!(
-                    " The error log could not be written ({e}), so the details follow:\n{}",
-                    invalid.report
-                )),
-            }
+    let merged = import.sheet_names.merged();
+    let mut sheets = Vec::new();
+    for sheet_name in import.sheet_names.iter() {
+        if merged.is_some() {
+            log.info(&format!("Sheet \"{sheet_name}\":"))?;
         }
-        return Err(message.into());
+        let mut builder =
+            ExcelValidatorBuilder::new(workbook.clone(), sheet_name, json_schema.clone());
+        if let Some(unpivot) = &import.unpivot {
+            builder = builder.unpivot(unpivot.clone());
+        }
+        if let Some(field) = &import.extra_columns_to {
+            builder = builder.extra_columns_to(field);
+        }
+        let validator = builder.build()?;
+        log_sheet(&validator, log)?;
+        sheets.push(validator);
+    }
+    let rows = sheets
+        .iter()
+        .map(|sheet| sheet.rows().len())
+        .fold(0_usize, usize::saturating_add);
+    if let Some(count) = merged {
+        // Before validating: rows of sheets that cannot be merged are not worth correcting yet
+        ExcelValidator::check_same_columns(&sheets)?;
+        log.info(&format!(
+            "✅ Merging {count} sheets into one CSV file: {rows} row(s)"
+        ))?;
+    }
+
+    // Every sheet validated before stopping, so one run lists all there is to correct
+    let mut refusals = Vec::new();
+    for sheet in &mut sheets {
+        if let Err(refused) = sheet.validate_excel() {
+            let title = match merged {
+                None => VALIDATION_REPORT_TITLE.to_string(),
+                Some(_) => format!(
+                    "{VALIDATION_REPORT_TITLE}: sheet \"{}\"",
+                    sheet.sheet_name()
+                ),
+            };
+            let message = refusal_message(environment, &title, &refused);
+            refusals.push(match merged {
+                None => message,
+                Some(_) => format!("Sheet \"{}\": {message}", sheet.sheet_name()),
+            });
+        }
+    }
+    if !refusals.is_empty() {
+        return Err(refusals.join("\n").into());
     }
     log.info("✅ Validation completed!")?;
 
-    let csv = validator
-        .to_csv(&title_to_name_mapping)
+    let csv = ExcelValidator::merged_csv(&sheets, &title_to_name_mapping)
         .map_err(|e| format!("Failed to create CSV with error: {e}"))?;
-    let rows = validator.rows().len();
     *progress = Progress::CsvNotSaved { rows };
     // Before the upload, so that the file sent is kept even if the upload fails
     environment
@@ -344,9 +402,95 @@ fn steps<E: Environment, L: Write, O: Write, R: Write>(
     Ok(())
 }
 
+/// Log what reading the sheet of `validator` did: its summaries, the ng/mL rows skipped, every
+/// change made to a cell, and the questions to the data owners
+fn log_sheet<L: Write, O: Write, R: Write>(
+    validator: &ExcelValidator,
+    log: &mut RunLog<L, O, R>,
+) -> io::Result<()> {
+    if let Some(summary) = validator.error_cells_summary() {
+        log.info(&format!("⚠️  {summary}"))?;
+    }
+    if let Some(summary) = validator.unpivot_summary() {
+        log.info(&format!("✅ {summary}"))?;
+    }
+    if let Some(summary) = validator.extra_columns_summary() {
+        log.info(&format!("✅ {summary}"))?;
+    }
+    log.notes(&ng_per_ml_rows_lines(validator.ng_per_ml_rows()))?;
+    log.notes(&changes_lines(&validator.change_lines()))?;
+    // Printed as well as logged: the data owners have to answer them
+    for line in questions_lines(validator.questions()) {
+        log.info(&line)?;
+    }
+    Ok(())
+}
+
+/// The message of `refused`, its report of the rows failing validation, if any, appended to the
+/// error log under `title`. If the log cannot be written, the message carries the report rather
+/// than pointing the user at a log that lacks it.
+fn refusal_message<E: Environment>(
+    environment: &mut E,
+    title: &str,
+    refused: &RowsRefused,
+) -> String {
+    let mut message = refused.to_string();
+    if let Some(invalid) = &refused.invalid_rows {
+        match environment.append_error_log(title, &invalid.report) {
+            Ok(()) => message.push_str(" Check the error log for details."),
+            Err(e) => message.push_str(&format!(
+                " The error log could not be written ({e}), so the details follow:\n{}",
+                invalid.report
+            )),
+        }
+    }
+    message
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn names(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| name.to_string()).collect()
+    }
+
+    #[test]
+    fn sheet_names_keep_the_order_given() {
+        let sheets = SheetNames::new(names(&["Water", "Air", "Sediment"])).unwrap();
+
+        assert_eq!(sheets.first(), "Water");
+        assert_eq!(
+            sheets.iter().collect::<Vec<_>>(),
+            vec!["Water", "Air", "Sediment"]
+        );
+        assert_eq!(sheets.merged(), Some(3));
+    }
+
+    #[test]
+    fn one_sheet_is_not_a_merge() {
+        let sheets = SheetNames::new(names(&["Water"])).unwrap();
+
+        assert_eq!(sheets.iter().collect::<Vec<_>>(), vec!["Water"]);
+        assert_eq!(sheets.merged(), None);
+    }
+
+    #[test]
+    fn no_sheet_is_refused() {
+        assert_eq!(
+            SheetNames::new(Vec::new()),
+            Err("No sheet given.".to_string())
+        );
+    }
+
+    /// Its rows would be uploaded twice
+    #[test]
+    fn a_sheet_given_twice_is_refused() {
+        let refused = SheetNames::new(names(&["Water", "Air", "Water"]));
+
+        let expected = "The sheet \"Water\" is given more than once.";
+        assert_eq!(refused, Err(expected.to_string()));
+    }
 
     /// Whatever the path, relative or absolute, with `/` or `\\`
     #[test]

@@ -136,4 +136,4 @@ pub fn create_test_title_to_name_mapping() -> HashMap<String, String> {
 // =============================================================================
 
 #[allow(unused_imports)] // Not every test file builds workbooks
-pub use excel_core::test_utils::{Cell, test_workbook};
+pub use excel_core::test_utils::{Cell, test_workbook, test_workbook_with_sheets};
