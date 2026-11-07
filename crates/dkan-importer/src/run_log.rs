@@ -3,7 +3,7 @@
 //! at its source. One file per run, named like the run's CSV file (see
 //! [`crate::utils::RunFiles`]).
 
-use excel_core::{NgPerMlRow, Question};
+use excel_core::{ConvertedRow, Counterpart, Question};
 use std::fs::File;
 use std::io::{self, Write};
 
@@ -43,18 +43,38 @@ pub fn questions_lines(questions: &[(Question, usize)]) -> Vec<String> {
     lines
 }
 
-/// The run log's lines for the ng/mL rows skipped, each with the ng/L row holding its values or
-/// the closest one; none without ng/mL rows
-pub fn ng_per_ml_rows_lines(rows: &[NgPerMlRow]) -> Vec<String> {
+/// The run log's lines for the rows in units some sheets also hold converted, such as ng/mL:
+/// how many were skipped and imported, then each, with the row holding its values or the closest
+/// one; none without such rows
+pub fn converted_rows_lines(rows: &[ConvertedRow]) -> Vec<String> {
     if rows.is_empty() {
         return Vec::new();
     }
+    let skipped = rows
+        .iter()
+        .filter(|row| matches!(row.counterpart, Counterpart::Found(_)))
+        .count();
     let mut lines = vec![format!(
-        "{} ng/mL row(s) skipped, as only ng/L is imported, each with the ng/L row holding its values:",
-        rows.len()
+        "{} row(s) in units also held converted ({}): {skipped} skipped, as another row holds their values, and {} imported as written, as none does:",
+        rows.len(),
+        converted_units(),
+        rows.len().saturating_sub(skipped)
     )];
     lines.extend(rows.iter().map(|row| format!("  {row}")));
     lines
+}
+
+/// Every unit some sheets also hold converted, with the units it is converted to, as in
+/// "ng/mL as ng/L, µg/m3 as ng/m3"
+fn converted_units() -> String {
+    excel_core::Concentration::ALL
+        .into_iter()
+        .filter_map(|units| {
+            let (converted, _) = units.converted()?;
+            Some(format!("{units} as {converted}"))
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Writes each line both to the terminal and to the run log. Never give it a credential.
@@ -110,7 +130,7 @@ impl<L: Write, O: Write, E: Write> RunLog<L, O, E> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use excel_core::{CellValue, Closest, Counterpart, Difference, SheetCell};
+    use excel_core::{CellValue, Closest, Concentration, Difference, SheetCell};
     use std::num::NonZeroUsize;
 
     fn cell() -> SheetCell {
@@ -163,15 +183,28 @@ mod tests {
         assert_eq!(questions_lines(&[]), Vec::<String>::new());
     }
 
+    fn converted_row(units: Concentration, counterpart: Counterpart, row: usize) -> ConvertedRow {
+        let (converted, factor) = units.converted().unwrap();
+        ConvertedRow {
+            units,
+            converted,
+            factor,
+            counterpart,
+            row,
+        }
+    }
+
     #[test]
-    fn ng_per_ml_rows_are_counted_and_listed_whether_their_ng_l_row_is_found_or_not() {
+    fn converted_rows_are_counted_and_listed_whether_skipped_or_imported() {
         let rows = [
-            NgPerMlRow {
-                counterpart: Counterpart::Found(23),
-                row: 2,
-            },
-            NgPerMlRow {
-                counterpart: Counterpart::Missing(Some(Closest {
+            converted_row(
+                Concentration::NanogramsPerMillilitre,
+                Counterpart::Found(23),
+                2,
+            ),
+            converted_row(
+                Concentration::NanogramsPerMillilitre,
+                Counterpart::Missing(Some(Closest {
                     first: Difference {
                         cell: cell(),
                         expected: "0.25".to_string(),
@@ -179,25 +212,26 @@ mod tests {
                     },
                     differences: NonZeroUsize::MIN,
                 })),
-                row: 3,
-            },
-            NgPerMlRow {
-                counterpart: Counterpart::Missing(None),
-                row: 5,
-            },
+                3,
+            ),
+            converted_row(
+                Concentration::MicrogramsPerGram,
+                Counterpart::Missing(None),
+                5,
+            ),
         ];
 
         let expected = vec![
-            "3 ng/mL row(s) skipped, as only ng/L is imported, each with the ng/L row holding its values:",
+            "3 row(s) in units also held converted (ng/mL as ng/L, µg/m3 as ng/m3, µg/g as ng/g): 1 skipped, as another row holds their values, and 2 imported as written, as none does:",
             "  row 2: skipped: in ng/mL; its values are in the ng/L row 23, which is imported",
-            "  row 3: skipped: in ng/mL, but no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row 4, differs in 1 cell(s), first at row 4, column L \"ST03\": Cell value: blank; expected 0.25",
-            "  row 5: skipped: in ng/mL, but the sheet has no ng/L row to hold its values",
+            "  row 3: imported in ng/mL, as no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row 4, differs in 1 cell(s), first at row 4, column L \"ST03\": Cell value: blank; expected 0.25",
+            "  row 5: imported in µg/g, as the sheet has no ng/g row to hold its values",
         ];
-        assert_eq!(ng_per_ml_rows_lines(&rows), expected);
+        assert_eq!(converted_rows_lines(&rows), expected);
     }
 
     #[test]
-    fn without_ng_per_ml_rows_the_log_has_no_ng_per_ml_section() {
-        assert_eq!(ng_per_ml_rows_lines(&[]), Vec::<String>::new());
+    fn without_converted_rows_the_log_has_no_converted_rows_section() {
+        assert_eq!(converted_rows_lines(&[]), Vec::<String>::new());
     }
 }

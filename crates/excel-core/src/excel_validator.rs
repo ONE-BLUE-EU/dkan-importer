@@ -190,12 +190,12 @@ impl Change {
 /// of cells, for the data owners to answer.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Question {
-    /// An ng/L row without both limits: its results cannot be characterised
-    MissingLimits,
+    /// A number in a concentration row without a Limit of quantification, taken as quantified
+    QuantifiedWithoutLoq,
     /// A number in a Peak Area row
     NumberInPeakArea,
-    /// X, a Peak Area result, in an ng/L row
-    XInNanogramsPerLitre,
+    /// X, a Peak Area result, in a concentration row
+    XInConcentration,
     /// An items result that is not a whole number of 0 or more
     ItemsNotWholeNumber,
     /// Units other than ng/L, Peak Area and items, as written
@@ -216,14 +216,14 @@ impl Question {
     /// Why a cell gives no row because of this question, for its line in the run log
     fn reason(&self) -> String {
         match self {
-            Question::MissingLimits => format!(
-                "the ng/L row has no {LOD_FIELD} or no {LOQ_FIELD}, so its results cannot be characterised"
-            ),
+            Question::QuantifiedWithoutLoq => {
+                format!("the row has no {LOQ_FIELD}, so the value is taken as quantified")
+            }
             Question::NumberInPeakArea => {
                 "a number in a Peak Area row has no meaning yet".to_string()
             }
-            Question::XInNanogramsPerLitre => {
-                "\"X\" is a Peak Area result, but the row is in ng/L".to_string()
+            Question::XInConcentration => {
+                "\"X\" is a Peak Area result, but the row is in concentration units".to_string()
             }
             Question::ItemsNotWholeNumber => {
                 "the row counts items, and this is not a whole number of 0 or more".to_string()
@@ -252,17 +252,18 @@ fn units_phrase(units: Option<&str>) -> String {
 impl std::fmt::Display for Question {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Question::MissingLimits => write!(
+            Question::QuantifiedWithoutLoq => write!(
                 f,
-                "ng/L rows without a {LOD_FIELD} or a {LOQ_FIELD} are not imported, as their results cannot be characterised. Should they be imported, and how?"
+                "Numbers in rows without a {LOQ_FIELD} are imported as \"{DETECTED_QUANTITATIVELY}\", unless below the row's {LOD_FIELD}. Is that right?"
             ),
             Question::NumberInPeakArea => write!(
                 f,
                 "Numbers in Peak Area rows are not imported. Should they be imported as the Concentration, with which detection characterisation, and should a field mark them as peak areas?"
             ),
-            Question::XInNanogramsPerLitre => write!(
+            Question::XInConcentration => write!(
                 f,
-                "X results in ng/L rows are not imported, as X is a Peak Area result. Are the units or the results wrong?"
+                "X results in rows with concentration units ({}) are not imported, as X is a Peak Area result. Are the units or the results wrong?",
+                Concentration::ALL.map(Concentration::name).join(", ")
             ),
             Question::ItemsNotWholeNumber => write!(
                 f,
@@ -295,92 +296,172 @@ impl std::fmt::Display for Question {
     }
 }
 
-/// Units some sheets keep beside their ng/L rows, which are calculated from them by formulas.
-/// Such a row is skipped, its values being in its ng/L row. Matched ignoring case.
-const NANOGRAMS_PER_MILLILITRE: &str = "ng/mL";
+/// A unit of concentration: each result is characterised against its row's limits
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Concentration {
+    NanogramsPerLitre,
+    NanogramsPerMillilitre,
+    NanogramsPerCubicMetre,
+    MicrogramsPerCubicMetre,
+    NanogramsPerGram,
+    MicrogramsPerGram,
+}
 
-/// An ng/mL value is this many times the same ng/L value
-const MILLILITRES_PER_LITRE: f64 = 1000.0;
+impl Concentration {
+    pub const ALL: [Concentration; 6] = [
+        Concentration::NanogramsPerLitre,
+        Concentration::NanogramsPerMillilitre,
+        Concentration::NanogramsPerCubicMetre,
+        Concentration::MicrogramsPerCubicMetre,
+        Concentration::NanogramsPerGram,
+        Concentration::MicrogramsPerGram,
+    ];
 
-/// How far apart, relative to the larger, an ng/L number may be from its ng/mL number x1000.
-/// Excel saves a formula's result to 15 significant digits, but sheets also hold them rounded to
-/// 10, as in `34.79658006` for `0.03479658005914394` ng/mL.
+    pub fn name(self) -> &'static str {
+        match self {
+            Concentration::NanogramsPerLitre => "ng/L",
+            Concentration::NanogramsPerMillilitre => "ng/mL",
+            Concentration::NanogramsPerCubicMetre => "ng/m3",
+            Concentration::MicrogramsPerCubicMetre => "µg/m3",
+            Concentration::NanogramsPerGram => "ng/g",
+            Concentration::MicrogramsPerGram => "µg/g",
+        }
+    }
+
+    /// The unit written as `text`: matched ignoring case and spaces, with µ also written as μ
+    /// or u, and m3 as m³
+    fn parse(text: &str) -> Option<Self> {
+        let key = |text: &str| -> String {
+            text.chars()
+                .filter(|c| !c.is_whitespace())
+                .map(|c| match c {
+                    'µ' | 'μ' => 'u',
+                    '³' => '3',
+                    c => c,
+                })
+                .collect::<String>()
+                .to_lowercase()
+        };
+        let text = key(text);
+        Concentration::ALL
+            .into_iter()
+            .find(|units| key(units.name()) == text)
+    }
+
+    /// The unit some sheets also hold this unit's rows in, converted by formulas, and what a
+    /// value is multiplied by in it. Such a row is skipped when a row in that unit holds its
+    /// values; see [`ConvertedRow`]. `None` for the units rows are converted to, and the others.
+    pub fn converted(self) -> Option<(Concentration, f64)> {
+        match self {
+            Concentration::NanogramsPerMillilitre => {
+                Some((Concentration::NanogramsPerLitre, 1000.0))
+            }
+            Concentration::MicrogramsPerCubicMetre => {
+                Some((Concentration::NanogramsPerCubicMetre, 1000.0))
+            }
+            Concentration::MicrogramsPerGram => Some((Concentration::NanogramsPerGram, 1000.0)),
+            Concentration::NanogramsPerLitre
+            | Concentration::NanogramsPerCubicMetre
+            | Concentration::NanogramsPerGram => None,
+        }
+    }
+}
+
+impl std::fmt::Display for Concentration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+/// How far apart, relative to the larger, a converted number may be from the number x the
+/// factor. Excel saves a formula's result to 15 significant digits, but sheets also hold them
+/// rounded to 10, as in `34.79658006` for `0.03479658005914394` ng/mL.
 const SAME_NUMBER_RELATIVE_TOLERANCE: f64 = 1e-6;
 
-/// An ng/mL row of an unpivoted sheet. Only ng/L is imported, so it is skipped, but its values
-/// must be in an ng/L row: sheets keep ng/mL rows beside the ng/L rows calculated from them by
-/// formulas, and a formula pointing at the wrong row would lose them.
+/// A row of an unpivoted sheet in units some sheets also hold converted, as ng/mL rows beside
+/// the ng/L rows calculated from them by formulas; see [`Concentration::converted`]. It is
+/// skipped when a row in the converted units holds its values, as they are imported there, and
+/// imported as written otherwise.
 #[derive(Debug, Clone, PartialEq)]
-pub struct NgPerMlRow {
+pub struct ConvertedRow {
+    /// The row's units
+    pub units: Concentration,
+    /// The units its values may also be in
+    pub converted: Concentration,
+    /// What a value is multiplied by in the converted units
+    pub factor: f64,
     pub counterpart: Counterpart,
     /// The row number Excel shows
     pub row: usize,
 }
 
-/// The ng/L row holding an ng/mL row's values: its text, ignoring case and spaces, and its
-/// numbers x1000 in the limits and the sample columns. Where the ng/mL row is blank, or holds an
-/// Excel error, the ng/L row may hold anything.
+/// The row in the converted units holding a [`ConvertedRow`]'s values: its text, ignoring case
+/// and spaces, and its numbers x the factor in the limits and the sample columns. Where the
+/// converted row is blank, or holds an Excel error, that row may hold anything.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Counterpart {
-    /// The row number Excel shows of the first ng/L row holding them
+    /// The row number Excel shows of the first row holding them: the converted row is skipped
     Found(usize),
-    /// No ng/L row holds them, which stops the run: the closest, unless the sheet has no ng/L row
+    /// No row holds them, so the converted row is imported: the closest row in the converted
+    /// units, unless the sheet has none
     Missing(Option<Closest>),
 }
 
-/// The ng/L row differing from an ng/mL row in the fewest cells, the first of them if several do
+/// The row differing from a converted row in the fewest cells, the first of them if several do
 #[derive(Debug, Clone, PartialEq)]
 pub struct Closest {
-    /// Its first difference, in sheet order, whose cell is in the ng/L row
+    /// Its first difference, in sheet order, whose cell is in that row
     pub first: Difference,
     /// The number of cells in which it differs
     pub differences: NonZeroUsize,
 }
 
-/// A cell of an ng/L row not holding the value of its ng/mL row
+/// A cell not holding the value of a converted row's cell
 #[derive(Debug, Clone, PartialEq)]
 pub struct Difference {
     pub cell: SheetCell,
-    /// The ng/mL value, as it should be in ng/L: a number, or text in quotes
+    /// The converted row's value, as it should be: a number, or text in quotes
     pub expected: String,
-    /// The ng/L cell's value
+    /// The cell's value
     pub found: CellValue,
 }
 
-impl std::fmt::Display for NgPerMlRow {
+impl std::fmt::Display for ConvertedRow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "row {}: skipped: in {NANOGRAMS_PER_MILLILITRE}",
-            self.row
-        )?;
-        match &self.counterpart {
-            Counterpart::Found(row) => {
-                write!(
-                    f,
-                    "; its values are in the ng/L row {row}, which is imported"
-                )
-            }
-            Counterpart::Missing(None) => {
-                write!(f, ", but the sheet has no ng/L row to hold its values")
-            }
+        let ConvertedRow {
+            units,
+            converted,
+            factor,
+            counterpart,
+            row,
+        } = self;
+        match counterpart {
+            Counterpart::Found(found) => write!(
+                f,
+                "row {row}: skipped: in {units}; its values are in the {converted} row {found}, which is imported"
+            ),
+            Counterpart::Missing(None) => write!(
+                f,
+                "row {row}: imported in {units}, as the sheet has no {converted} row to hold its values"
+            ),
             Counterpart::Missing(Some(Closest { first, differences })) => write!(
                 f,
-                ", but no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row {}, differs in {differences} cell(s), first at {}: Cell value: {}; expected {}",
+                "row {row}: imported in {units}, as no {converted} row has its values (x{factor} in the limits and the sample columns); the closest, row {}, differs in {differences} cell(s), first at {}: Cell value: {}; expected {}",
                 first.cell.row, first.cell, first.found, first.expected
             ),
         }
     }
 }
 
-/// A column whose value in an ng/mL row must be in its ng/L row
+/// A column whose value in a [`ConvertedRow`] must be in the row holding its values
 struct ComparedColumn {
     /// The column letters Excel shows
     column: String,
     header: Option<String>,
     index: usize,
-    /// What the ng/mL number is multiplied by in ng/L: [`MILLILITRES_PER_LITRE`] or 1
-    factor: f64,
+    /// Whether its numbers are converted: a limit or a sample column. Others are compared as
+    /// they are.
+    converted: bool,
 }
 
 /// A cell's number, whether it holds a number or text holding one
@@ -394,48 +475,49 @@ fn cell_number(cell: &Data) -> Option<f64> {
     .filter(|n| n.is_finite())
 }
 
-/// What the ng/L cell should hold and what it holds, unless it holds the ng/mL cell's value
-/// multiplied by `factor`
+/// What the `holding` cell should hold and what it holds, unless it holds the value of the
+/// `converted` cell multiplied by `factor`
 fn difference(
-    ng_per_ml: Option<&Data>,
-    ng_per_l: Option<&Data>,
+    converted: Option<&Data>,
+    holding: Option<&Data>,
     factor: f64,
 ) -> Option<(String, CellValue)> {
-    let ng_per_ml = ng_per_ml.filter(|cell| !is_blank(cell) && !matches!(cell, Data::Error(_)))?;
-    let (expected, holds) = match cell_number(ng_per_ml) {
+    let converted = converted.filter(|cell| !is_blank(cell) && !matches!(cell, Data::Error(_)))?;
+    let (expected, holds) = match cell_number(converted) {
         Some(n) => {
             let expected = n * factor;
-            let holds = ng_per_l.and_then(cell_number).is_some_and(|found| {
+            let holds = holding.and_then(cell_number).is_some_and(|found| {
                 (found - expected).abs()
                     <= SAME_NUMBER_RELATIVE_TOLERANCE * found.abs().max(expected.abs())
             });
             (expected.to_string(), holds)
         }
         None => {
-            let text = ng_per_ml.to_string();
+            let text = converted.to_string();
             let text = text.trim();
             let holds =
-                ng_per_l.is_some_and(|cell| cell.to_string().trim().eq_ignore_ascii_case(text));
+                holding.is_some_and(|cell| cell.to_string().trim().eq_ignore_ascii_case(text));
             (format!("\"{text}\""), holds)
         }
     };
-    (!holds).then(|| (expected, CellValue::of(ng_per_l)))
+    (!holds).then(|| (expected, CellValue::of(holding)))
 }
 
-/// The ng/L row of `ng_per_litre` (row number, cells) holding the values of the ng/mL row
-/// `ng_per_ml` in `columns`
+/// The row of `candidates` (row number, cells) holding the values of the row `converted` in
+/// `columns`, its numbers multiplied by `factor` where the column is converted
 fn counterpart(
-    ng_per_ml: &[Data],
-    ng_per_litre: &[(usize, &[Data])],
+    converted: &[Data],
+    candidates: &[(usize, &[Data])],
     columns: &[ComparedColumn],
+    factor: f64,
 ) -> Counterpart {
     let mut closest: Option<Closest> = None;
-    for (row, ng_per_l) in ng_per_litre {
+    for (row, holding) in candidates {
         let mut differences = columns.iter().filter_map(|column| {
             difference(
-                ng_per_ml.get(column.index),
-                ng_per_l.get(column.index),
-                column.factor,
+                converted.get(column.index),
+                holding.get(column.index),
+                if column.converted { factor } else { 1.0 },
             )
             .map(|difference| (column, difference))
         });
@@ -467,7 +549,7 @@ fn counterpart(
 /// A row's units, read from its [`UNITS_FIELD`] cell, ignoring case and surrounding spaces
 #[derive(Debug, PartialEq)]
 enum Units {
-    NanogramsPerLitre,
+    Concentration(Concentration),
     PeakArea,
     Items,
     Missing,
@@ -481,16 +563,14 @@ impl Units {
             return Units::Missing;
         };
         let text = text.trim();
+        if let Some(units) = Concentration::parse(text) {
+            return Units::Concentration(units);
+        }
         match text.to_lowercase().as_str() {
-            "ng/l" => Units::NanogramsPerLitre,
             "peak area" => Units::PeakArea,
             "items" => Units::Items,
             _ => Units::Other(text.to_string()),
         }
-    }
-
-    fn is_ng_per_ml(&self) -> bool {
-        matches!(self, Units::Other(units) if units.eq_ignore_ascii_case(NANOGRAMS_PER_MILLILITRE))
     }
 }
 
@@ -546,39 +626,22 @@ fn characterise(
         })
     };
     match units {
-        Units::NanogramsPerLitre => {
-            if matches!(result, SampleResult::Marker(X_MARKER)) {
-                return Outcome::open(Question::XInNanogramsPerLitre);
-            }
-            let (Some(lod), Some(loq)) = (lod, loq) else {
-                return Outcome::open(Question::MissingLimits);
-            };
-            match result {
-                SampleResult::Number(n) if *n >= loq => characterised(
-                    DETECTED_QUANTITATIVELY,
-                    format!("the value is at least the {LOQ_FIELD} ({loq})"),
-                ),
-                SampleResult::Number(n) if *n >= lod => characterised(
-                    DETECTED_NOT_QUANTIFIED,
-                    format!(
-                        "the value is between the {LOD_FIELD} ({lod}) and the {LOQ_FIELD} ({loq})"
-                    ),
-                ),
-                SampleResult::Number(_) => characterised(
-                    NOT_DETECTED,
-                    format!("the value is below the {LOD_FIELD} ({lod})"),
-                ),
-                SampleResult::Marker(LOD_MARKER) => characterised(
-                    NOT_DETECTED,
-                    format!("\"{LOD_MARKER}\" means below the {LOD_FIELD}"),
-                ),
-                SampleResult::Marker(LOQ_MARKER) => characterised(
-                    DETECTED_NOT_QUANTIFIED,
-                    format!("\"{LOQ_MARKER}\" means detected, but below the {LOQ_FIELD}"),
-                ),
-                SampleResult::Marker(_) => unclassified(Some("ng/L".to_string())),
-            }
-        }
+        Units::Concentration(units) => match result {
+            SampleResult::Marker(X_MARKER) => Outcome::Open {
+                question: Question::XInConcentration,
+                reason: format!("\"X\" is a Peak Area result, but the row is in {units}"),
+            },
+            SampleResult::Marker(LOD_MARKER) => characterised(
+                NOT_DETECTED,
+                format!("\"{LOD_MARKER}\" means below the {LOD_FIELD}"),
+            ),
+            SampleResult::Marker(LOQ_MARKER) => characterised(
+                DETECTED_NOT_QUANTIFIED,
+                format!("\"{LOQ_MARKER}\" means detected, but below the {LOQ_FIELD}"),
+            ),
+            SampleResult::Marker(_) => unclassified(Some(units.to_string())),
+            SampleResult::Number(n) => characterise_number(*n, lod, loq),
+        },
         Units::PeakArea => match result {
             SampleResult::Marker(X_MARKER) => characterised(
                 DETECTED_QUALITATIVELY,
@@ -605,6 +668,46 @@ fn characterise(
             },
         },
         Units::Other(units) => Outcome::open(Question::OtherUnits(units.clone())),
+    }
+}
+
+/// The detection characterisation of the number `n` in a concentration row with limits `lod`
+/// and `loq`: against the limits the row has. Taken as quantified, on an assumption, when the
+/// row has no `loq` and `n` is not below `lod`.
+fn characterise_number(n: f64, lod: Option<f64>, loq: Option<f64>) -> Outcome {
+    let characterised = |detection: &'static str, reason: String| Outcome::Characterised {
+        detection,
+        reason,
+        question: (detection == DETECTED_NOT_QUANTIFIED).then_some(Question::DetectedNotQuantified),
+    };
+    let quantified_without_loq = |reason: String| Outcome::Characterised {
+        detection: DETECTED_QUANTITATIVELY,
+        reason,
+        question: Some(Question::QuantifiedWithoutLoq),
+    };
+    match (lod, loq) {
+        (Some(lod), _) if n < lod => characterised(
+            NOT_DETECTED,
+            format!("the value is below the {LOD_FIELD} ({lod})"),
+        ),
+        (Some(lod), Some(loq)) if n < loq => characterised(
+            DETECTED_NOT_QUANTIFIED,
+            format!("the value is between the {LOD_FIELD} ({lod}) and the {LOQ_FIELD} ({loq})"),
+        ),
+        (None, Some(loq)) if n < loq => characterised(
+            DETECTED_NOT_QUANTIFIED,
+            format!("the value is below the {LOQ_FIELD} ({loq}), and the row has no {LOD_FIELD}"),
+        ),
+        (_, Some(loq)) => characterised(
+            DETECTED_QUANTITATIVELY,
+            format!("the value is at least the {LOQ_FIELD} ({loq})"),
+        ),
+        (Some(lod), None) => quantified_without_loq(format!(
+            "the value is at least the {LOD_FIELD} ({lod}), and the row has no {LOQ_FIELD}, so it is taken as quantified"
+        )),
+        (None, None) => quantified_without_loq(format!(
+            "the row has no {LOD_FIELD} or {LOQ_FIELD}, so the value is taken as quantified"
+        )),
     }
 }
 
@@ -654,8 +757,8 @@ struct ProcessedSheet {
     changes: Vec<Change>,
     /// The open questions, each with the number of cells concerned
     questions: Vec<(Question, usize)>,
-    /// The ng/mL rows skipped, in sheet order, each with its ng/L row
-    ng_per_ml_rows: Vec<NgPerMlRow>,
+    /// The rows in units some sheets also hold converted, in sheet order; see [`ConvertedRow`]
+    converted_rows: Vec<ConvertedRow>,
     /// What stops the run until the source is corrected, each a message listing its cells
     problems: Vec<String>,
     /// The markers allowed in the values field, when an unpivot sends its cells to a text field
@@ -805,7 +908,7 @@ pub struct ExcelValidator {
     error_cells_summary: Option<String>,
     changes: Vec<Change>,
     questions: Vec<(Question, usize)>,
-    ng_per_ml_rows: Vec<NgPerMlRow>,
+    converted_rows: Vec<ConvertedRow>,
     problems: Vec<String>,
     values_markers: Option<ValuesMarkers>,
 }
@@ -1113,7 +1216,7 @@ impl ExcelValidatorBuilder {
             error_cells_summary: None,
             changes: Vec::new(),
             questions: Vec::new(),
-            ng_per_ml_rows: Vec::new(),
+            converted_rows: Vec::new(),
             problems: Vec::new(),
             values_markers: None,
         };
@@ -1137,7 +1240,7 @@ impl ExcelValidatorBuilder {
             error_cells_summary: sheet.error_cells_summary,
             changes: sheet.changes,
             questions: sheet.questions,
-            ng_per_ml_rows: sheet.ng_per_ml_rows,
+            converted_rows: sheet.converted_rows,
             problems: sheet.problems,
             values_markers: sheet.values_markers,
         })
@@ -1170,7 +1273,7 @@ impl ExcelValidator {
             error_cells_summary: None,
             changes: Vec::new(),
             questions: Vec::new(),
-            ng_per_ml_rows: Vec::new(),
+            converted_rows: Vec::new(),
             problems: Vec::new(),
             values_markers: None,
         })
@@ -1216,10 +1319,11 @@ impl ExcelValidator {
         &self.questions
     }
 
-    /// The ng/mL rows of an unpivoted sheet, in sheet order. Each is skipped, and says which ng/L
-    /// row holds its values, or the closest one when none does, which stops the run.
-    pub fn ng_per_ml_rows(&self) -> &[NgPerMlRow] {
-        &self.ng_per_ml_rows
+    /// The rows of an unpivoted sheet in units some sheets also hold converted, such as ng/mL,
+    /// in sheet order: each skipped, naming the row holding its values, or imported as written,
+    /// naming the closest row, when none does; see [`ConvertedRow`]
+    pub fn converted_rows(&self) -> &[ConvertedRow] {
+        &self.converted_rows
     }
 
     /// Get the headers from the Excel file
@@ -1634,8 +1738,11 @@ impl ExcelValidator {
         let mut no_sample_cells: usize = 0;
         // Rows with results whose identification level is not IDENTIFICATION_LEVEL
         let mut wrong_identification_levels: Vec<String> = Vec::new();
-        // Rows in ng/mL, skipped here and matched with their ng/L rows once every row is read
-        let mut ng_per_ml_count: usize = 0;
+        // Rows in units some sheets also hold converted, each with the row holding its values, if
+        // any; see ConvertedRow
+        let mut converted_rows: Vec<ConvertedRow> = Vec::new();
+        // The columns compared to find the row holding a converted row's values
+        let mut compared: Vec<ComparedColumn> = Vec::new();
         // The open questions, each with the number of cells concerned
         let mut questions: BTreeMap<Question, usize> = BTreeMap::new();
         let mut parsed_rows: Vec<ParsedExcelRow> = Vec::new();
@@ -1695,6 +1802,7 @@ impl ExcelValidator {
                             headers.push(DETECTION_FIELD.to_string());
                         }
                         kept = unpivot_kept;
+                        compared = compared_columns(&columns, &kept, &unpivot_samples, first_col);
                         samples = Some(unpivot_samples);
                     }
                 }
@@ -1704,13 +1812,25 @@ impl ExcelValidator {
 
             let row_number = sheet_row(first_row, row_index);
 
-            // Before anything else, as nothing of an ng/mL row is imported: not even its Excel
-            // error cells are listed as emptied
+            // Before anything else, as nothing of a row whose values another row holds is
+            // imported: not even its Excel error cells are listed as emptied
             if let Some(samples) = &samples
-                && Units::parse(row.get(samples.units)).is_ng_per_ml()
+                && let Units::Concentration(units) = Units::parse(row.get(samples.units))
+                && let Some((converted, factor)) = units.converted()
             {
-                ng_per_ml_count = ng_per_ml_count.saturating_add(1);
-                continue;
+                let candidates = rows_in_units(&range, first_row, samples.units, converted);
+                let counterpart = counterpart(row, &candidates, &compared, factor);
+                let skipped = matches!(counterpart, Counterpart::Found(_));
+                converted_rows.push(ConvertedRow {
+                    units,
+                    converted,
+                    factor,
+                    counterpart,
+                    row: row_number,
+                });
+                if skipped {
+                    continue;
+                }
             }
 
             let sheet_cell = |col_idx: usize| SheetCell {
@@ -1974,26 +2094,6 @@ impl ExcelValidator {
             ));
         }
 
-        let ng_per_ml_rows = match &samples {
-            Some(samples) if ng_per_ml_count > 0 => {
-                ng_per_ml_rows(&range, first_row, first_col, &columns, &kept, samples)
-            }
-            _ => Vec::new(),
-        };
-        let missing: Vec<String> = ng_per_ml_rows
-            .iter()
-            .filter(|row| matches!(row.counterpart, Counterpart::Missing(_)))
-            .map(ToString::to_string)
-            .collect();
-        if !missing.is_empty() {
-            problems.push(format!(
-                "The sheet \"{}\" has {} {NANOGRAMS_PER_MILLILITRE} row(s) whose values no ng/L row holds. Only ng/L is imported, so each {NANOGRAMS_PER_MILLILITRE} row is skipped, and its values must be in an ng/L row: correct the ng/L rows in the source file and try again:\n  {}",
-                self.sheet_name,
-                missing.len(),
-                missing.join("\n  ")
-            ));
-        }
-
         if !wrong_identification_levels.is_empty() {
             problems.push(format!(
                 "The sheet \"{}\" has {} row(s) whose {} is not a number. A blank one is taken as {}: correct these cells in the source file and try again:\n  {}",
@@ -2044,9 +2144,13 @@ impl ExcelValidator {
                 })
                 .unwrap_or_default();
             let mut blanks = String::new();
-            if ng_per_ml_count > 0 {
+            let skipped = converted_rows
+                .iter()
+                .filter(|row| matches!(row.counterpart, Counterpart::Found(_)))
+                .count();
+            if skipped > 0 {
                 blanks.push_str(&format!(
-                    "; {ng_per_ml_count} {NANOGRAMS_PER_MILLILITRE} row(s) skipped"
+                    "; {skipped} row(s) skipped, their values being in another row in other units"
                 ));
             }
             if blank_sample_cells > 0 {
@@ -2119,7 +2223,7 @@ impl ExcelValidator {
             }),
             changes,
             questions: questions.into_iter().collect(),
-            ng_per_ml_rows,
+            converted_rows,
             problems,
             values_markers,
         })
@@ -3633,57 +3737,54 @@ fn sheet_row(first_row: u32, row_index: usize) -> usize {
         .saturating_add(1)
 }
 
-/// The ng/mL rows of `range`, an unpivoted sheet laid out in `columns`, `kept` and `samples`, each
-/// with its ng/L row
-fn ng_per_ml_rows(
-    range: &calamine::Range<Data>,
-    first_row: u32,
-    first_col: u32,
+/// The columns compared to find the row holding a [`ConvertedRow`]'s values, in an unpivoted
+/// sheet laid out in `columns`, `kept` and `samples`: every kept column but the units, then the
+/// sample columns
+fn compared_columns(
     columns: &[Option<String>],
     kept: &[usize],
     samples: &SampleColumns,
-) -> Vec<NgPerMlRow> {
-    let compared_column = |index: usize, factor: f64| ComparedColumn {
+    first_col: u32,
+) -> Vec<ComparedColumn> {
+    let compared_column = |index: usize, converted: bool| ComparedColumn {
         column: column_name(sheet_column(first_col, index)),
         header: columns.get(index).cloned().flatten(),
         index,
-        factor,
+        converted,
     };
-    let compared: Vec<ComparedColumn> = kept
-        .iter()
+    kept.iter()
         .filter(|&&index| index != samples.units)
         .map(|&index| {
             let is_limit = columns
                 .get(index)
                 .and_then(Option::as_deref)
                 .is_some_and(|header| header == LOD_FIELD || header == LOQ_FIELD);
-            compared_column(index, if is_limit { MILLILITRES_PER_LITRE } else { 1.0 })
+            compared_column(index, is_limit)
         })
         .chain(
             samples
                 .columns
                 .iter()
-                .map(|(index, _)| compared_column(*index, MILLILITRES_PER_LITRE)),
+                .map(|(index, _)| compared_column(*index, true)),
         )
-        .collect();
+        .collect()
+}
 
-    let mut ng_per_ml: Vec<(usize, &[Data])> = Vec::new();
-    let mut ng_per_litre: Vec<(usize, &[Data])> = Vec::new();
+/// The rows of `range`, whose units are in column `units_column`, in `units`, each with the row
+/// number Excel shows
+fn rows_in_units(
+    range: &calamine::Range<Data>,
+    first_row: u32,
+    units_column: usize,
+    units: Concentration,
+) -> Vec<(usize, &[Data])> {
     // The first row holds the headers
-    for (row_index, row) in range.rows().enumerate().skip(1) {
-        let units = Units::parse(row.get(samples.units));
-        if units.is_ng_per_ml() {
-            ng_per_ml.push((sheet_row(first_row, row_index), row));
-        } else if units == Units::NanogramsPerLitre {
-            ng_per_litre.push((sheet_row(first_row, row_index), row));
-        }
-    }
-    ng_per_ml
-        .into_iter()
-        .map(|(row, cells)| NgPerMlRow {
-            counterpart: counterpart(cells, &ng_per_litre, &compared),
-            row,
-        })
+    range
+        .rows()
+        .enumerate()
+        .skip(1)
+        .filter(|(_, row)| Units::parse(row.get(units_column)) == Units::Concentration(units))
+        .map(|(row_index, row)| (sheet_row(first_row, row_index), row))
         .collect()
 }
 

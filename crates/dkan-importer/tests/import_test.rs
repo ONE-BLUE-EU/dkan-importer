@@ -564,8 +564,9 @@ fn unpivot() -> Unpivot {
     }
 }
 
+/// Only an ng/mL row whose values an ng/L row holds is skipped
 #[test]
-fn an_ng_ml_row_without_its_ng_l_row_is_in_the_run_log_and_nothing_is_uploaded() {
+fn an_ng_ml_row_without_its_ng_l_row_is_logged_and_uploaded_in_ng_ml() {
     let sheet = test_workbook(&[
         vec![
             Text("Substance"),
@@ -593,26 +594,27 @@ fn an_ng_ml_row_without_its_ng_l_row_is_in_the_run_log_and_nothing_is_uploaded()
 
     let outcome = run_import(&import, environment(sheet, dkan));
 
-    let error = outcome.error.expect("the ng/mL row must stop the run");
-    assert!(
-        error
-            .starts_with("The sheet \"Sheet1\" has 1 ng/mL row(s) whose values no ng/L row holds."),
-        "{error}"
-    );
-    let logged = "1 ng/mL row(s) skipped, as only ng/L is imported, each with the ng/L row holding its values:
-  row 2: skipped: in ng/mL, but the sheet has no ng/L row to hold its values
+    assert_eq!(outcome.error, None);
+    let logged = "1 row(s) in units also held converted (ng/mL as ng/L, µg/m3 as ng/m3, µg/g as ng/g): 0 skipped, as another row holds their values, and 1 imported as written, as none does:
+  row 2: imported in ng/mL, as the sheet has no ng/L row to hold its values
 ";
     assert!(outcome.log.contains(logged), "{}", outcome.log);
+    assert!(outcome.stdout.contains(": 1 row(s)."), "{}", outcome.stdout);
+    let csv = "Substance,Identification Level,Detection characterisation,Concentration units,Limit of detection,Limit of quantification,Sample Tag,Concentration
+Okadaic acid,2,detected quantitatively,ng/mL,0.0001,0.00025,ST01,0.0003
+";
+    let [(_, saved)] = outcome.saved_csv.as_slice() else {
+        panic!("one CSV file expected: {:?}", outcome.saved_csv);
+    };
+    assert_eq!(saved, csv);
     assert!(
-        outcome.stdout.contains("0 row(s); 1 ng/mL row(s) skipped"),
-        "{}",
-        outcome.stdout
+        outcome
+            .calls
+            .iter()
+            .any(|call| matches!(call, Call::Upload { .. })),
+        "{:?}",
+        outcome.calls
     );
-    assert_eq!(
-        outcome.calls,
-        vec![Call::CheckLogin, dataset_title(), data_dictionary()]
-    );
-    assert!(outcome.error_log.is_empty());
 }
 
 #[test]

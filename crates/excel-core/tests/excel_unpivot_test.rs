@@ -1364,7 +1364,7 @@ fn x_in_an_ng_l_row_gives_no_row_and_a_question() {
     ];
     assert_eq!(unpivoted.changes, expected);
     let expected = vec![
-        "1 cell(s): X results in ng/L rows are not imported, as X is a Peak Area result. Are the units or the results wrong?",
+        "1 cell(s): X results in rows with concentration units (ng/L, ng/mL, ng/m3, µg/m3, ng/g, µg/g) are not imported, as X is a Peak Area result. Are the units or the results wrong?",
     ];
     assert_eq!(unpivoted.questions, expected);
 }
@@ -1375,7 +1375,6 @@ fn unclear_results_give_no_row_and_a_question() {
     let rows = analytical_sheet(
         &["ST01"],
         vec![
-            vec![Empty, Text("ng/L"), Number(0.1), Empty, Number(0.3)],
             vec![Empty, Text("Peak Area"), Empty, Empty, Number(1234.0)],
             vec![Empty, Text("ug/kg"), Number(0.1), Number(0.25), Number(0.3)],
             vec![Empty, Empty, Empty, Empty, Number(0.3)],
@@ -1400,16 +1399,14 @@ fn unclear_results_give_no_row_and_a_question() {
     ];
     assert_eq!(unpivoted.columns(&RESULTS), expected);
     let expected = vec![
-        "row 2, column G \"ST01\": Cell value: 0.3. Not imported, because the ng/L row has no Limit of detection or no Limit of quantification, so its results cannot be characterised. See Q1.",
-        "row 3, column G \"ST01\": Cell value: 1234. Not imported, because a number in a Peak Area row has no meaning yet. See Q2.",
-        "row 4, column G \"ST01\": Cell value: 0.3. Not imported, because Concentration units \"ug/kg\" are not imported. See Q3.",
-        "row 5, column G \"ST01\": Cell value: 0.3. Not imported, because a number in a row without Concentration units has no meaning yet. See Q5.",
-        "row 6, column G \"ST01\": Cell value: \"<LOD\". Not imported, because \"<LOD\" in a row with Concentration units \"Peak Area\" has no meaning yet. See Q4.",
-        "row 7, column G \"ST01\": Cell value: \"<LOQ\". Not imported, because Concentration units \"ug/kg\" are not imported. See Q3.",
+        "row 2, column G \"ST01\": Cell value: 1234. Not imported, because a number in a Peak Area row has no meaning yet. See Q1.",
+        "row 3, column G \"ST01\": Cell value: 0.3. Not imported, because Concentration units \"ug/kg\" are not imported. See Q2.",
+        "row 4, column G \"ST01\": Cell value: 0.3. Not imported, because a number in a row without Concentration units has no meaning yet. See Q4.",
+        "row 5, column G \"ST01\": Cell value: \"<LOD\". Not imported, because \"<LOD\" in a row with Concentration units \"Peak Area\" has no meaning yet. See Q3.",
+        "row 6, column G \"ST01\": Cell value: \"<LOQ\". Not imported, because Concentration units \"ug/kg\" are not imported. See Q2.",
     ];
     assert_eq!(unpivoted.changes, expected);
     let expected = vec![
-        "1 cell(s): ng/L rows without a Limit of detection or a Limit of quantification are not imported, as their results cannot be characterised. Should they be imported, and how?",
         "1 cell(s): Numbers in Peak Area rows are not imported. Should they be imported as the Concentration, with which detection characterisation, and should a field mark them as peak areas?",
         "2 cell(s): Rows with Concentration units \"ug/kg\" are not imported. How should they be handled?",
         "1 cell(s): \"<LOD\" in a row with Concentration units \"Peak Area\" is not imported. What does it mean?",
@@ -1566,38 +1563,37 @@ fn every_problem_is_reported_in_one_run_with_the_changes_and_questions() {
         .to_string();
 
     let expected = vec![
-        "row 2, column G \"ST01\": Cell value: \"X\". Not imported, because \"X\" is a Peak Area result, but the row is in ng/L. See Q1.",
-        "row 4, column G \"ST01\": Cell value: 1.5. Not imported, because the row counts items, and this is not a whole number of 0 or more. See Q2.",
+        "row 2, column G \"ST01\": Cell value: \"X\". Not imported, because \"X\" is a Peak Area result, but the row is in ng/L. See Q2.",
+        "row 4, column G \"ST01\": Cell value: 1.5. Not imported, because the row counts items, and this is not a whole number of 0 or more. See Q3.",
     ];
     assert_eq!(changes, expected);
-    // X in ng/L, the 1.5 items, and "detected, not quantified" for row 2's 0.2
-    assert_eq!(questions.len(), 3, "{questions:?}");
+    // Row 3's ng/mL 0.3 taken as quantified without a limit of quantification, X in ng/L, the
+    // 1.5 items, and "detected, not quantified" for row 2's 0.2
+    assert_eq!(questions.len(), 4, "{questions:?}");
     let expected = "The sheet \"Sheet1\" has 1 row(s) whose Identification Level is not a number. A blank one is taken as 2: correct these cells in the source file and try again:
   row 4: Cell value: \"2A\"";
     assert!(err.contains(expected), "{err}");
-    assert!(
-        err.contains("has 1 ng/mL row(s) whose values no ng/L row holds"),
-        "{err}"
-    );
+    // Row 3, in ng/mL without an ng/L row holding its values, is imported, not refused
+    assert!(!err.contains("ng/mL"), "{err}");
 }
 
-/// What the validator built from `rows` says: its ng/mL rows as the run log lists them, its
+/// What the validator built from `rows` says: its converted rows as the run log lists them, its
 /// changes, and the error of the run, if it stops.
-struct NgPerMlRun {
-    ng_per_ml_rows: Vec<String>,
+struct ConvertedRun {
+    converted_rows: Vec<String>,
     changes: Vec<String>,
     summary: String,
     error: Option<String>,
 }
 
-fn run_ng_per_ml(rows: &[Vec<Cell>]) -> NgPerMlRun {
+fn run_converted(rows: &[Vec<Cell>]) -> ConvertedRun {
     let mut validator = ExcelValidatorBuilder::new(test_workbook(rows), "Sheet1", text_schema())
         .unpivot(spec())
         .build()
-        .unwrap_or_else(|e| panic!("ng/mL rows must not stop the build: {e:#}"));
-    NgPerMlRun {
-        ng_per_ml_rows: validator
-            .ng_per_ml_rows()
+        .unwrap_or_else(|e| panic!("converted rows must not stop the build: {e:#}"));
+    ConvertedRun {
+        converted_rows: validator
+            .converted_rows()
             .iter()
             .map(ToString::to_string)
             .collect(),
@@ -1607,10 +1603,10 @@ fn run_ng_per_ml(rows: &[Vec<Cell>]) -> NgPerMlRun {
     }
 }
 
-/// Only ng/L is imported. Some sheets keep ng/mL rows beside the ng/L rows calculated from them
-/// by formulas, so an ng/mL row is skipped when an ng/L row holds its values: the same text
-/// (ignoring case and spaces), and its numbers x1000 in the limits and the sample columns. Where
-/// the ng/mL row is blank, or holds an Excel error, the ng/L row may hold anything.
+/// Some sheets keep ng/mL rows beside the ng/L rows calculated from them by formulas, so an ng/mL
+/// row is skipped when an ng/L row holds its values: the same text (ignoring case and spaces),
+/// and its numbers x1000 in the limits and the sample columns. Where the ng/mL row is blank, or
+/// holds an Excel error, the ng/L row may hold anything.
 #[test]
 fn ng_ml_rows_are_skipped_when_an_ng_l_row_holds_their_values() {
     let rows = analytical_sheet(
@@ -1658,18 +1654,20 @@ fn ng_ml_rows_are_skipped_when_an_ng_l_row_holds_their_values() {
         ],
     );
 
-    let run = run_ng_per_ml(&rows);
+    let run = run_converted(&rows);
 
     let expected = vec![
         "row 3: skipped: in ng/mL; its values are in the ng/L row 2, which is imported",
         "row 4: skipped: in ng/mL; its values are in the ng/L row 5, which is imported",
     ];
-    assert_eq!(run.ng_per_ml_rows, expected);
+    assert_eq!(run.converted_rows, expected);
     assert_eq!(run.error, None);
     // Row 3's #VALUE! is not emptied for the upload: the row is not uploaded
     assert_eq!(run.changes, Vec::<String>::new());
     assert!(
-        run.summary.contains("3 row(s); 2 ng/mL row(s) skipped"),
+        run.summary.contains(
+            "3 row(s); 2 row(s) skipped, their values being in another row in other units"
+        ),
         "{}",
         run.summary
     );
@@ -1692,10 +1690,10 @@ fn ng_ml_rows_are_skipped_when_an_ng_l_row_holds_their_values() {
     );
 }
 
-/// An ng/mL row whose values no ng/L row holds is still skipped, but stops the run, naming the
+/// An ng/mL row whose values no ng/L row holds is imported as written, and the run log names the
 /// ng/L row closest to it and its first difference, as a formula in it may point at the wrong row.
 #[test]
-fn an_ng_ml_row_without_an_equivalent_ng_l_row_stops_the_run_naming_the_closest() {
+fn an_ng_ml_row_without_an_equivalent_ng_l_row_is_imported_naming_the_closest() {
     let rows = analytical_sheet(
         &["ST01", "ST02"],
         vec![
@@ -1736,19 +1734,32 @@ fn an_ng_ml_row_without_an_equivalent_ng_l_row_stops_the_run_naming_the_closest(
         ],
     );
 
-    let run = run_ng_per_ml(&rows);
+    let run = run_converted(&rows);
 
-    let line = "row 2: skipped: in ng/mL, but no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row 4, differs in 1 cell(s), first at row 4, column F \"Limit of quantification\": Cell value: blank; expected 0.25";
-    assert_eq!(run.ng_per_ml_rows, vec![line]);
-    let error = run.error.expect("the missing ng/L row must stop the run");
-    let expected = format!(
-        "The sheet \"Sheet1\" has 1 ng/mL row(s) whose values no ng/L row holds. Only ng/L is imported, so each ng/mL row is skipped, and its values must be in an ng/L row: correct the ng/L rows in the source file and try again:\n  {line}"
+    let line = "row 2: imported in ng/mL, as no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row 4, differs in 1 cell(s), first at row 4, column F \"Limit of quantification\": Cell value: blank; expected 0.25";
+    assert_eq!(run.converted_rows, vec![line]);
+    assert_eq!(run.error, None);
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
+    let expected = vec![
+        "Sample Tag,Concentration,Concentration units",
+        "ST01,0.0003,ng/mL",
+        "ST02,<LOD,ng/mL",
+        "ST01,0.03,ng/L",
+        "ST02,<LOQ,ng/L",
+        "ST01,0.3,ng/L",
+        "ST02,<LOD,ng/L",
+        "ST01,0.03,ng/L",
+        "ST02,<LOQ,ng/L",
+    ];
+    assert_eq!(
+        unpivoted.columns(&["Sample Tag", "Concentration", "Concentration units"]),
+        expected
     );
-    assert!(error.contains(&expected), "{error}");
 }
 
+/// The sheet's only results in ng/mL are imported in ng/mL
 #[test]
-fn an_ng_ml_row_in_a_sheet_without_ng_l_rows_stops_the_run() {
+fn an_ng_ml_row_in_a_sheet_without_ng_l_rows_is_imported() {
     let rows = analytical_sheet(
         &["ST01"],
         vec![
@@ -1763,17 +1774,37 @@ fn an_ng_ml_row_in_a_sheet_without_ng_l_rows_stops_the_run() {
         ],
     );
 
-    let run = run_ng_per_ml(&rows);
+    let run = run_converted(&rows);
 
-    let line = "row 2: skipped: in ng/mL, but the sheet has no ng/L row to hold its values";
-    assert_eq!(run.ng_per_ml_rows, vec![line]);
-    let error = run.error.expect("the missing ng/L row must stop the run");
-    assert!(error.contains(&format!("\n  {line}")), "{error}");
+    let line = "row 2: imported in ng/mL, as the sheet has no ng/L row to hold its values";
+    assert_eq!(run.converted_rows, vec![line]);
+    assert_eq!(run.error, None);
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
+    let expected = vec![
+        "Sample Tag,Concentration,Concentration units,Detection characterisation",
+        "ST01,0.0003,ng/mL,detected quantitatively",
+        "ST01,X,Peak Area,detected qualitatively",
+    ];
+    assert_eq!(
+        unpivoted.columns(&[
+            "Sample Tag",
+            "Concentration",
+            "Concentration units",
+            "Detection characterisation"
+        ]),
+        expected
+    );
+    assert!(
+        !unpivoted.summary.contains("skipped, their values"),
+        "{}",
+        unpivoted.summary
+    );
 }
 
-/// An ng/mL row is not imported, so its identification level is not checked; its ng/L row's is.
+/// A skipped ng/mL row is not imported, so its identification level is not checked; its ng/L
+/// row's is.
 #[test]
-fn the_identification_level_of_an_ng_ml_row_is_not_checked() {
+fn the_identification_level_of_a_skipped_ng_ml_row_is_not_checked() {
     let mut rows = analytical_sheet(
         &["ST01"],
         vec![
@@ -1790,11 +1821,11 @@ fn the_identification_level_of_an_ng_ml_row_is_not_checked() {
     rows[1][1] = Text("1");
     rows[2][1] = Text("1");
 
-    let run = run_ng_per_ml(&rows);
+    let run = run_converted(&rows);
 
     let expected =
         vec!["row 2: skipped: in ng/mL; its values are in the ng/L row 3, which is imported"];
-    assert_eq!(run.ng_per_ml_rows, expected);
+    assert_eq!(run.converted_rows, expected);
     let error = run
         .error
         .expect("row 3's identification level must stop the run");
@@ -1804,4 +1835,293 @@ fn the_identification_level_of_an_ng_ml_row_is_not_checked() {
     );
     assert!(error.contains("\n  row 3: Cell value: \"1\""), "{error}");
     assert!(!error.contains("\n  row 2: "), "{error}");
+}
+
+/// The CSV columns most concentration tests are about
+const UNITS_RESULTS: [&str; 4] = [
+    "Sample Tag",
+    "Concentration",
+    "Concentration units",
+    "Detection characterisation",
+];
+
+/// Every concentration unit is characterised the same way against its row's limits
+#[test]
+fn every_concentration_unit_is_characterised_against_the_rows_limits() {
+    for units in ["ng/L", "ng/mL", "ng/m3", "µg/m3", "ng/g", "µg/g"] {
+        let rows = analytical_sheet(
+            &["ST01", "ST02", "ST03", "ST04", "ST05"],
+            vec![vec![
+                Empty,
+                Text(units),
+                Number(0.1),
+                Number(0.25),
+                Number(0.3),
+                Number(0.2),
+                Number(0.05),
+                Text("<LOD"),
+                Text("<LOQ"),
+            ]],
+        );
+
+        let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
+
+        let expected = vec![
+            "Sample Tag,Concentration,Concentration units,Detection characterisation".to_string(),
+            format!("ST01,0.3,{units},detected quantitatively"),
+            format!("ST02,0.2,{units},detected, not quantified"),
+            format!("ST03,0.05,{units},not detected"),
+            format!("ST04,<LOD,{units},not detected"),
+            format!("ST05,<LOQ,{units},detected, not quantified"),
+        ];
+        assert_eq!(unpivoted.columns(&UNITS_RESULTS), expected, "{units}");
+    }
+}
+
+/// Units are matched ignoring case and spaces, with µ also written as μ (Greek mu) or u, and m3
+/// as m³; they are imported as written
+#[test]
+fn units_are_matched_however_micro_and_cubed_are_written() {
+    let written = ["UG/G", "μg/g", "µg / g", "ng/m³", "NG/M3", " ng/mL "];
+    let rows = analytical_sheet(
+        &["ST01"],
+        written
+            .iter()
+            .map(|units| vec![Empty, Text(units), Number(0.1), Number(0.25), Number(0.3)])
+            .collect(),
+    );
+
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
+
+    let expected = vec![
+        "Sample Tag,Concentration,Concentration units,Detection characterisation",
+        "ST01,0.3,UG/G,detected quantitatively",
+        "ST01,0.3,μg/g,detected quantitatively",
+        "ST01,0.3,µg / g,detected quantitatively",
+        "ST01,0.3,ng/m³,detected quantitatively",
+        "ST01,0.3,NG/M3,detected quantitatively",
+        "ST01,0.3,ng/mL,detected quantitatively",
+    ];
+    assert_eq!(unpivoted.columns(&UNITS_RESULTS), expected);
+    assert_eq!(unpivoted.questions, Vec::<String>::new());
+}
+
+/// Without both limits, a number is characterised against the limits the row has. Without a
+/// limit of quantification, one not below the limit of detection is taken as quantified, which
+/// the run log asks about. The markers keep their meaning whatever the limits.
+#[test]
+fn numbers_are_characterised_against_the_limits_the_row_has() {
+    let rows = analytical_sheet(
+        &["ST01", "ST02", "ST03"],
+        vec![
+            // Row 2: no limits
+            vec![
+                Text("detected qualitatively"),
+                Text("ng/m3"),
+                Empty,
+                Empty,
+                Number(0.3),
+                Text("<LOD"),
+                Text("<LOQ"),
+            ],
+            // Row 3: a limit of detection only
+            vec![
+                Text("detected qualitatively"),
+                Text("ng/g"),
+                Number(0.1),
+                Empty,
+                Number(0.3),
+                Number(0.05),
+            ],
+            // Row 4: a limit of quantification only
+            vec![
+                Text("detected qualitatively"),
+                Text("µg/g"),
+                Empty,
+                Number(0.25),
+                Number(0.3),
+                Number(0.2),
+            ],
+        ],
+    );
+
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
+
+    let expected = vec![
+        "Sample Tag,Concentration,Concentration units,Detection characterisation",
+        "ST01,0.3,ng/m3,detected quantitatively",
+        "ST02,<LOD,ng/m3,not detected",
+        "ST03,<LOQ,ng/m3,detected, not quantified",
+        "ST01,0.3,ng/g,detected quantitatively",
+        "ST02,0.05,ng/g,not detected",
+        "ST01,0.3,µg/g,detected quantitatively",
+        "ST02,0.2,µg/g,detected, not quantified",
+    ];
+    assert_eq!(unpivoted.columns(&UNITS_RESULTS), expected);
+    let derived = "Imported with Detection characterisation";
+    let was = "instead of the sheet's \"detected qualitatively\", because";
+    let expected = vec![
+        format!(
+            "row 2, column G \"ST01\": Cell value: 0.3. {derived} \"detected quantitatively\" {was} the row has no Limit of detection or Limit of quantification, so the value is taken as quantified. See Q1."
+        ),
+        format!(
+            "row 2, column H \"ST02\": Cell value: \"<LOD\". {derived} \"not detected\" {was} \"<LOD\" means below the Limit of detection."
+        ),
+        format!(
+            "row 2, column I \"ST03\": Cell value: \"<LOQ\". {derived} \"detected, not quantified\" {was} \"<LOQ\" means detected, but below the Limit of quantification. See Q2."
+        ),
+        format!(
+            "row 3, column G \"ST01\": Cell value: 0.3. {derived} \"detected quantitatively\" {was} the value is at least the Limit of detection (0.1), and the row has no Limit of quantification, so it is taken as quantified. See Q1."
+        ),
+        format!(
+            "row 3, column H \"ST02\": Cell value: 0.05. {derived} \"not detected\" {was} the value is below the Limit of detection (0.1)."
+        ),
+        format!(
+            "row 4, column G \"ST01\": Cell value: 0.3. {derived} \"detected quantitatively\" {was} the value is at least the Limit of quantification (0.25)."
+        ),
+        format!(
+            "row 4, column H \"ST02\": Cell value: 0.2. {derived} \"detected, not quantified\" {was} the value is below the Limit of quantification (0.25), and the row has no Limit of detection. See Q2."
+        ),
+    ];
+    assert_eq!(unpivoted.changes, expected);
+    let expected = vec![
+        "2 cell(s): Numbers in rows without a Limit of quantification are imported as \"detected quantitatively\", unless below the row's Limit of detection. Is that right?",
+        "2 cell(s): Results between the Limit of detection and the Limit of quantification, and \"<LOQ\" results, are imported as \"detected, not quantified\". The template's dropdown list does not have this value: it has \"detected semiquantitatively\". Which should be used?",
+    ];
+    assert_eq!(unpivoted.questions, expected);
+}
+
+/// X is a Peak Area result, whatever the concentration units
+#[test]
+fn x_in_any_concentration_row_gives_no_row() {
+    let rows = analytical_sheet(
+        &["ST01"],
+        vec![
+            vec![Empty, Text("µg/m3"), Empty, Empty, Text("X")],
+            vec![Empty, Text("ng/g"), Empty, Empty, Number(1.0)],
+        ],
+    );
+
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
+
+    let expected = vec![
+        "row 2, column G \"ST01\": Cell value: \"X\". Not imported, because \"X\" is a Peak Area result, but the row is in µg/m3. See Q2.",
+    ];
+    assert_eq!(unpivoted.changes, expected);
+}
+
+/// Each converted unit is matched with its own: µg/m3 rows with ng/m3 rows and µg/g rows with
+/// ng/g rows, x1000
+#[test]
+fn microgram_rows_are_skipped_when_a_nanogram_row_holds_their_values() {
+    let rows = analytical_sheet(
+        &["ST01", "ST02"],
+        vec![
+            vec![
+                Empty,
+                Text("µg/m3"),
+                Empty,
+                Empty,
+                Number(0.035),
+                Text("<LOQ"),
+            ],
+            vec![Empty, Text("ng/g"), Empty, Empty, Number(7.0), Empty],
+            vec![
+                Empty,
+                Text("ng/m3"),
+                Empty,
+                Empty,
+                Number(35.0),
+                Text("<LOQ"),
+            ],
+            vec![Empty, Text("µg/g"), Empty, Empty, Number(0.007), Empty],
+        ],
+    );
+
+    let run = run_converted(&rows);
+
+    let expected = vec![
+        "row 2: skipped: in µg/m3; its values are in the ng/m3 row 4, which is imported",
+        "row 5: skipped: in µg/g; its values are in the ng/g row 3, which is imported",
+    ];
+    assert_eq!(run.converted_rows, expected);
+    assert_eq!(run.error, None);
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
+    let expected = vec![
+        "Sample Tag,Concentration,Concentration units,Detection characterisation",
+        "ST01,7,ng/g,detected quantitatively",
+        "ST01,35,ng/m3,detected quantitatively",
+        "ST02,<LOQ,ng/m3,detected, not quantified",
+    ];
+    assert_eq!(unpivoted.columns(&UNITS_RESULTS), expected);
+}
+
+/// A row in other units holding the values does not count: µg/g is held in ng/g, not ng/L
+#[test]
+fn a_converted_row_is_only_matched_with_rows_in_its_converted_units() {
+    let rows = analytical_sheet(
+        &["ST01"],
+        vec![
+            vec![Empty, Text("µg/g"), Empty, Empty, Number(0.007)],
+            vec![Empty, Text("ng/L"), Empty, Empty, Number(7.0)],
+            vec![Empty, Text("ng/mL"), Empty, Empty, Number(0.007)],
+        ],
+    );
+
+    let run = run_converted(&rows);
+
+    let expected = vec![
+        "row 2: imported in µg/g, as the sheet has no ng/g row to hold its values",
+        "row 4: skipped: in ng/mL; its values are in the ng/L row 3, which is imported",
+    ];
+    assert_eq!(run.converted_rows, expected);
+}
+
+/// The same numbers, not converted, are not the converted row's values
+#[test]
+fn a_row_with_the_unconverted_numbers_does_not_hold_a_converted_rows_values() {
+    let rows = analytical_sheet(
+        &["ST01"],
+        vec![
+            vec![Empty, Text("µg/g"), Empty, Empty, Number(0.007)],
+            vec![Empty, Text("ng/g"), Empty, Empty, Number(0.007)],
+        ],
+    );
+
+    let run = run_converted(&rows);
+
+    let expected = vec![
+        "row 2: imported in µg/g, as no ng/g row has its values (x1000 in the limits and the sample columns); the closest, row 3, differs in 1 cell(s), first at row 3, column G \"ST01\": Cell value: 0.007; expected 7",
+    ];
+    assert_eq!(run.converted_rows, expected);
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
+    let expected = vec![
+        "Sample Tag,Concentration,Concentration units,Detection characterisation",
+        "ST01,0.007,µg/g,detected quantitatively",
+        "ST01,0.007,ng/g,detected quantitatively",
+    ];
+    assert_eq!(unpivoted.columns(&UNITS_RESULTS), expected);
+}
+
+/// An imported ng/mL row is checked like any other, its identification level included
+#[test]
+fn the_identification_level_of_an_imported_ng_ml_row_is_checked() {
+    let mut rows = analytical_sheet(
+        &["ST01"],
+        vec![vec![
+            Empty,
+            Text("ng/mL"),
+            Number(0.0001),
+            Number(0.00025),
+            Number(0.0003),
+        ]],
+    );
+    rows[1][1] = Text("1");
+
+    let run = run_converted(&rows);
+
+    let error = run
+        .error
+        .expect("row 2's identification level must stop the run");
+    assert!(error.contains("\n  row 2: Cell value: \"1\""), "{error}");
 }

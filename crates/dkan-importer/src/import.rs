@@ -4,7 +4,7 @@
 
 use crate::dkan::{Dkan, HttpsUrl, NewDistribution};
 use crate::model::DataDictionary;
-use crate::run_log::{RunLog, changes_lines, ng_per_ml_rows_lines, questions_lines};
+use crate::run_log::{RunLog, changes_lines, converted_rows_lines, questions_lines};
 use excel_core::anyhow::Result;
 use excel_core::{ExcelValidator, ExcelValidatorBuilder, RowsRefused, Unpivot};
 use std::collections::HashSet;
@@ -402,7 +402,7 @@ fn steps<E: Environment, L: Write, O: Write, R: Write>(
     Ok(())
 }
 
-/// Log what reading the sheet of `validator` did: its summaries, the ng/mL rows skipped, every
+/// Log what reading the sheet of `validator` did: its summaries, the converted rows, every
 /// change made to a cell, and the questions to the data owners
 fn log_sheet<L: Write, O: Write, R: Write>(
     validator: &ExcelValidator,
@@ -417,7 +417,7 @@ fn log_sheet<L: Write, O: Write, R: Write>(
     if let Some(summary) = validator.extra_columns_summary() {
         log.info(&format!("✅ {summary}"))?;
     }
-    log.notes(&ng_per_ml_rows_lines(validator.ng_per_ml_rows()))?;
+    log.notes(&converted_rows_lines(validator.converted_rows()))?;
     log.notes(&changes_lines(&validator.change_lines()))?;
     // Printed as well as logged: the data owners have to answer them
     for line in questions_lines(validator.questions()) {

@@ -135,32 +135,36 @@ Each result's "Detection characterisation" is worked out from its row's "Concent
 
 | Units | Result | Detection characterisation |
 | ----- | ------ | -------------------------- |
-| ng/L | a number at least the limit of quantification | detected quantitatively |
-| ng/L | a number from the limit of detection up to the limit of quantification, or `<LOQ` | detected, not quantified |
-| ng/L | a number below the limit of detection, or `<LOD` | not detected |
+| a concentration | a number at least the limit of quantification | detected quantitatively |
+| a concentration | a number from the limit of detection up to the limit of quantification, or `<LOQ` | detected, not quantified |
+| a concentration | a number below the limit of detection, or `<LOD` | not detected |
+| a concentration, the row without a limit of quantification | a number not below the limit of detection, if any | detected quantitatively (asked about) |
 | Peak Area | `X` | detected qualitatively |
 | none | `X` | detected qualitatively (taken as Peak Area; the units stay empty) |
 | items | a whole number, 0 or more | detected quantitatively |
 
+- The concentration units are ng/L, ng/mL, ng/m3, µg/m3, ng/g and µg/g, matched ignoring case and spaces, with µ also written as μ or u, and m3 as m³. They are imported as written.
+- A number is compared with the limits its row has. In a row with only a limit of quantification, a number below it is "detected, not quantified". In a row without a limit of quantification, a number not below the limit of detection (or any number, without either limit) is imported as "detected quantitatively", and the run log asks the data owners to confirm it. `<LOD` and `<LOQ` keep their meaning whatever the limits.
 - Where the result's characterisation differs from the sheet's own, the run log says so, with the cell value and the reason, and the question it depends on, if any: `row 2, column AQ "24019033": Cell value: "<LOQ". Imported with Detection characterisation "detected, not quantified" instead of the sheet's "detected quantitatively", because "<LOQ" means detected, but below the Limit of quantification. See Q1.`, or `...: Cell value: 0.05. Imported with Detection characterisation "not detected" instead of the sheet's "detected quantitatively", because the value is below the Limit of detection (0.1).`
-- Rows in ng/mL (matched ignoring case and spaces) are skipped: only ng/L is imported. Sheets keep them beside the ng/L rows calculated from them by formulas, which the importer reads as the values Excel saved, so the source file needs no change. Each ng/mL row's values must be in an ng/L row of the sheet: the same text (ignoring case and spaces), and its numbers x1000 in the limits and the sample columns, to 6 significant digits. Where the ng/mL row is blank or holds an Excel error, the ng/L row may hold anything (such as a Classification). The summary counts the skipped rows, and the run log lists each, with its ng/L row:
+- Some sheets hold rows in one unit beside rows calculated from them by formulas in another: ng/mL beside ng/L, µg/m3 beside ng/m3, µg/g beside ng/g, each x1000. A row in ng/mL, µg/m3 or µg/g is skipped when a row in ng/L, ng/m3 or ng/g, respectively, holds its values: the same text (ignoring case and spaces), and its numbers x1000 in the limits and the sample columns, to 6 significant digits. Where it is blank or holds an Excel error, the other row may hold anything (such as a Classification). The importer reads formulas as the values Excel saved, so the source file needs no change. Otherwise the row is imported as written, in its own units, naming the row in the other units differing from it in the fewest cells, if any, as a formula there may point at the wrong row. The summary counts the skipped rows, and the run log lists each such row:
 
   ```
-  2 ng/mL row(s) skipped, as only ng/L is imported, each with the ng/L row holding its values:
+  3 row(s) in units also held converted (ng/mL as ng/L, µg/m3 as ng/m3, µg/g as ng/g): 1 skipped, as another row holds their values, and 2 imported as written, as none does:
     row 2: skipped: in ng/mL; its values are in the ng/L row 23, which is imported
-    row 18: skipped: in ng/mL, but no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row 39, differs in 1 cell(s), first at row 39, column J "Limit of quantification": Cell value: blank; expected 0.6746666666666667
+    row 18: imported in ng/mL, as no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row 39, differs in 1 cell(s), first at row 39, column J "Limit of quantification": Cell value: blank; expected 0.6746666666666667
+    row 24: imported in µg/g, as the sheet has no ng/g row to hold its values
   ```
 
-  An ng/mL row whose values no ng/L row holds stops the run, naming the ng/L row differing from it in the fewest cells, as a formula there may point at the wrong row. An ng/mL row's identification level is not checked, as it is not imported.
+  A skipped row's identification level is not checked, as it is not imported.
 - What is not clear yet is not imported: the cell gives no row, and the run log lists it with the number of its question (`... Not imported, because "X" is a Peak Area result, but the row is in ng/L. See Q2.`). The questions are printed and logged once each, numbered, with the number of cells:
 
   ```
   Questions to data owners:
   Q1 (14 cells): Results between the Limit of detection and the Limit of quantification, and "<LOQ" results, are imported as "detected, not quantified". The template's dropdown list does not have this value: it has "detected semiquantitatively". Which should be used?
-  Q2 (3 cells): X results in ng/L rows are not imported, as X is a Peak Area result. Are the units or the results wrong?
+  Q2 (3 cells): X results in rows with concentration units (ng/L, ng/mL, ng/m3, µg/m3, ng/g, µg/g) are not imported, as X is a Peak Area result. Are the units or the results wrong?
   ```
 
-  The questions are: an ng/L row without both limits, a number in a Peak Area row, `X` in an ng/L row (X is a Peak Area result), an items result that is not a whole number of 0 or more, other units (such as ug/kg), any other result without units or with a marker that has no characterisation. "detected, not quantified" is also asked about, as the template's dropdown list has "detected semiquantitatively" instead.
+  The questions are: a number taken as quantified in a row without a limit of quantification (imported), a number in a Peak Area row, `X` in a concentration row (X is a Peak Area result), an items result that is not a whole number of 0 or more, other units (such as ug/kg), any other result without units or with a marker that has no characterisation. "detected, not quantified" is also asked about, as the template's dropdown list has "detected semiquantitatively" instead.
 
 ### Keeping extra columns
 
@@ -203,7 +207,7 @@ dkan-importer ... --unpivot --headers-column "Sample Tag" \
   --sheet-name "Analytical results (Sediment)"
 ```
 
-- Each sheet is read, unpivoted and validated on its own, exactly as if it were imported alone: its run log lines name its own rows and columns, and an ng/mL row is only matched with an ng/L row of the same sheet. In the output and the run log, each sheet's lines come under `Sheet "<name>":`.
+- Each sheet is read, unpivoted and validated on its own, exactly as if it were imported alone: its run log lines name its own rows and columns, and an ng/mL row, for example, is only matched with an ng/L row of the same sheet. In the output and the run log, each sheet's lines come under `Sheet "<name>":`.
 - The CSV file then holds the rows of every sheet, one sheet after the other in the order given, under one header row.
 - Every sheet must have the same columns, in the same order, once read (for an unpivoted sheet: the same leading columns; the sample columns may differ). Otherwise the run stops, before validating any rows, naming the first sheet that differs and both lists of columns.
 - Every sheet is validated before the run stops, so one run lists everything to correct. Each sheet refused gets a line in the error, as in `Sheet "Analytical results (Air)": Excel validation failed with 1 error(s) across 1 row(s). Check the error log for details.`, and its own entry in the error log, titled `Excel Validation Error Report: sheet "<name>"`. Nothing is uploaded unless every sheet is accepted.
@@ -312,7 +316,7 @@ Blank sample cells are not listed, as a sheet has thousands: the summary line co
 
 Rows that fail validation are not changes: they are listed in `errors.log`.
 
-Problems that must be corrected in the source file (an Identification Level that is not a number, an ng/mL row whose values no ng/L row holds, data in a column without a header) stop the run only once every row has been read. So one run reports all of them together, after the summary, the changes and the questions, and nothing is written or uploaded.
+Problems that must be corrected in the source file (an Identification Level that is not a number, data in a column without a header) stop the run only once every row has been read. So one run reports all of them together, after the summary, the changes and the questions, and nothing is written or uploaded.
 
 ### Error Log File
 When rows fail validation, the run appends an entry to `errors.log`, in the directory it runs in, containing:
