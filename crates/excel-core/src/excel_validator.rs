@@ -116,12 +116,13 @@ pub enum ChangeKind {
     /// A value written as `now` instead of the cell's
     Rewritten { now: String, reason: String },
     /// A field of the sample cell's result worked out by the importer as `derived`, differing
-    /// from the row's own value `was`
+    /// from the row's own value `was`; on an assumption when it raises `question`
     Derived {
         field: String,
         derived: String,
         was: String,
         reason: String,
+        question: Option<Question>,
     },
 }
 
@@ -135,29 +136,52 @@ pub enum SkipReason {
     Open { question: Question, reason: String },
 }
 
-impl std::fmt::Display for Change {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Change {
+    /// The change's line in the run log: the cell and its value, then what became of it and why,
+    /// in plain words, and the number of the question it depends on among `questions`, if any
+    pub fn line(&self, questions: &[(Question, usize)]) -> String {
         let Change { cell, value, kind } = self;
-        write!(f, "{cell}: Cell value: {value}; ")?;
-        match kind {
-            ChangeKind::Emptied => {
-                f.write_str("emptied: a failed calculation, read as a blank cell")
+        let (what, question) = match kind {
+            ChangeKind::Emptied => (
+                "Imported as a blank cell, because an Excel error is a failed calculation"
+                    .to_string(),
+                None,
+            ),
+            ChangeKind::Skipped(SkipReason::NoSample) => (
+                match value {
+                    CellValue::Text(text) if text.trim().eq_ignore_ascii_case(NO_SAMPLE) => {
+                        "Not imported, because no sample was taken".to_string()
+                    }
+                    _ => format!(
+                        "Not imported, because it is taken as {NO_SAMPLE}: no sample was taken"
+                    ),
+                },
+                None,
+            ),
+            ChangeKind::Skipped(SkipReason::Open { question, reason }) => {
+                (format!("Not imported, because {reason}"), Some(question))
             }
-            ChangeKind::Skipped(SkipReason::NoSample) => match value {
-                CellValue::Text(text) if text.trim().eq_ignore_ascii_case(NO_SAMPLE) => {
-                    f.write_str("no row: no sample")
-                }
-                _ => write!(f, "no row: treated as {NO_SAMPLE} (no sample)"),
-            },
-            ChangeKind::Skipped(SkipReason::Open { reason, .. }) => write!(f, "no row: {reason}"),
-            ChangeKind::Rewritten { now, reason } => write!(f, "written as \"{now}\": {reason}"),
+            ChangeKind::Rewritten { now, reason } => {
+                (format!("Imported as \"{now}\", because {reason}"), None)
+            }
             ChangeKind::Derived {
                 field,
                 derived,
                 was,
                 reason,
-            } => write!(f, "{field} \"{derived}\" instead of \"{was}\": {reason}"),
-        }
+                question,
+            } => (
+                format!(
+                    "Imported with {field} \"{derived}\" instead of the sheet's \"{was}\", because {reason}"
+                ),
+                question.as_ref(),
+            ),
+        };
+        let see = question
+            .and_then(|question| questions.iter().position(|(asked, _)| asked == question))
+            .map(|index| format!(" See Q{}.", index.saturating_add(1)))
+            .unwrap_or_default();
+        format!("{cell}: Cell value: {value}. {what}.{see}")
     }
 }
 
@@ -195,15 +219,22 @@ impl Question {
             Question::MissingLimits => format!(
                 "the ng/L row has no {LOD_FIELD} or no {LOQ_FIELD}, so its results cannot be characterised"
             ),
-            Question::NumberInPeakArea => "a number in a Peak Area row".to_string(),
-            Question::XInNanogramsPerLitre => "X in an ng/L row".to_string(),
-            Question::ItemsNotWholeNumber => "not a whole number of items".to_string(),
-            Question::OtherUnits(units) => format!("{UNITS_FIELD} \"{units}\" are not imported"),
-            Question::UnclassifiedResult { result, units } => {
-                format!("{result} in a row {}", units_phrase(units.as_deref()))
+            Question::NumberInPeakArea => {
+                "a number in a Peak Area row has no meaning yet".to_string()
             }
+            Question::XInNanogramsPerLitre => {
+                "\"X\" is a Peak Area result, but the row is in ng/L".to_string()
+            }
+            Question::ItemsNotWholeNumber => {
+                "the row counts items, and this is not a whole number of 0 or more".to_string()
+            }
+            Question::OtherUnits(units) => format!("{UNITS_FIELD} \"{units}\" are not imported"),
+            Question::UnclassifiedResult { result, units } => format!(
+                "{result} in a row {} has no meaning yet",
+                units_phrase(units.as_deref())
+            ),
             Question::EmptyUnitsTakenAsPeakArea => {
-                "X in a row without Concentration units, taken as Peak Area".to_string()
+                format!("the row has no {UNITS_FIELD}, so \"X\" is taken as a Peak Area result")
             }
             Question::DetectedNotQuantified => DETECTED_NOT_QUANTIFIED.to_string(),
         }
@@ -258,7 +289,7 @@ impl std::fmt::Display for Question {
             ),
             Question::DetectedNotQuantified => write!(
                 f,
-                "Results between the {LOD_FIELD} and the {LOQ_FIELD}, and <LOQ, are characterised as \"{DETECTED_NOT_QUANTIFIED}\", which the template's dropdown list does not have (it has \"detected semiquantitatively\"). Which should be used?"
+                "Results between the {LOD_FIELD} and the {LOQ_FIELD}, and \"{LOQ_MARKER}\" results, are imported as \"{DETECTED_NOT_QUANTIFIED}\". The template's dropdown list does not have this value: it has \"detected semiquantitatively\". Which should be used?"
             ),
         }
     }
@@ -525,28 +556,34 @@ fn characterise(
             match result {
                 SampleResult::Number(n) if *n >= loq => characterised(
                     DETECTED_QUANTITATIVELY,
-                    format!("at least the {LOQ_FIELD} ({loq})"),
+                    format!("the value is at least the {LOQ_FIELD} ({loq})"),
                 ),
                 SampleResult::Number(n) if *n >= lod => characterised(
                     DETECTED_NOT_QUANTIFIED,
-                    format!("between the {LOD_FIELD} ({lod}) and the {LOQ_FIELD} ({loq})"),
+                    format!(
+                        "the value is between the {LOD_FIELD} ({lod}) and the {LOQ_FIELD} ({loq})"
+                    ),
                 ),
-                SampleResult::Number(_) => {
-                    characterised(NOT_DETECTED, format!("below the {LOD_FIELD} ({lod})"))
-                }
-                SampleResult::Marker(LOD_MARKER) => {
-                    characterised(NOT_DETECTED, format!("below the {LOD_FIELD}"))
-                }
-                SampleResult::Marker(LOQ_MARKER) => {
-                    characterised(DETECTED_NOT_QUANTIFIED, format!("below the {LOQ_FIELD}"))
-                }
+                SampleResult::Number(_) => characterised(
+                    NOT_DETECTED,
+                    format!("the value is below the {LOD_FIELD} ({lod})"),
+                ),
+                SampleResult::Marker(LOD_MARKER) => characterised(
+                    NOT_DETECTED,
+                    format!("\"{LOD_MARKER}\" means below the {LOD_FIELD}"),
+                ),
+                SampleResult::Marker(LOQ_MARKER) => characterised(
+                    DETECTED_NOT_QUANTIFIED,
+                    format!("\"{LOQ_MARKER}\" means detected, but below the {LOQ_FIELD}"),
+                ),
                 SampleResult::Marker(_) => unclassified(Some("ng/L".to_string())),
             }
         }
         Units::PeakArea => match result {
-            SampleResult::Marker(X_MARKER) => {
-                characterised(DETECTED_QUALITATIVELY, "X in a Peak Area row".to_string())
-            }
+            SampleResult::Marker(X_MARKER) => characterised(
+                DETECTED_QUALITATIVELY,
+                "\"X\" in a Peak Area row means detected, without a concentration".to_string(),
+            ),
             SampleResult::Number(_) => Outcome::open(Question::NumberInPeakArea),
             SampleResult::Marker(_) => unclassified(Some("Peak Area".to_string())),
         },
@@ -560,11 +597,11 @@ fn characterise(
         },
         Units::Items => match result {
             SampleResult::Number(n) if *n >= 0.0 && n.fract() == 0.0 => {
-                characterised(DETECTED_QUANTITATIVELY, "a count of items".to_string())
+                characterised(DETECTED_QUANTITATIVELY, "the row counts items".to_string())
             }
             _ => Outcome::Open {
                 question: Question::ItemsNotWholeNumber,
-                reason: "not a whole number of items".to_string(),
+                reason: Question::ItemsNotWholeNumber.reason(),
             },
         },
         Units::Other(units) => Outcome::open(Question::OtherUnits(units.clone())),
@@ -1162,6 +1199,15 @@ impl ExcelValidator {
     /// its reason
     pub fn changes(&self) -> &[Change] {
         &self.changes
+    }
+
+    /// The run log's line for each change, in sheet order, naming the questions by their number
+    /// in [`ExcelValidator::questions`]
+    pub fn change_lines(&self) -> Vec<String> {
+        self.changes
+            .iter()
+            .map(|change| change.line(&self.questions))
+            .collect()
     }
 
     /// The open questions about the data, each with the number of cells concerned, in a fixed
@@ -1802,7 +1848,7 @@ impl ExcelValidator {
                             Some(field) => {
                                 format!("the number after the marker is the row's {field}")
                             }
-                            None => "markers are written uppercase".to_string(),
+                            None => "markers are written in capitals".to_string(),
                         };
                         changes.push(Change {
                             cell: sheet_cell(*col_idx),
@@ -1830,7 +1876,7 @@ impl ExcelValidator {
                             reason,
                             question,
                         } => {
-                            if let Some(question) = question {
+                            if let Some(question) = question.clone() {
                                 let count = questions.entry(question).or_insert(0);
                                 *count = count.saturating_add(1);
                             }
@@ -1845,6 +1891,7 @@ impl ExcelValidator {
                                         derived: detection.to_string(),
                                         was: was.to_string(),
                                         reason,
+                                        question,
                                     },
                                 });
                             }

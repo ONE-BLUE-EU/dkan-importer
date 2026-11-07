@@ -84,7 +84,7 @@ Okadaic acid   | ST02_Surface | 0.40
 
 - The leading columns whose headers are data dictionary fields are copied to every row. Every column after them is a sample column.
 - A blank sample cell is no result, so it gives no row. Cells with only spaces, and formulas that give `""`, count as blank.
-- The sheet must have an "Identification Level" column before the sample columns, and the data dictionary that field; otherwise the run stops before reading any rows. In every row with results, the cell must hold a number, uploaded as written, or be blank, uploaded as `2` and listed in the run log: `row 3, column B "Identification Level": Cell value: blank; written as "2": a blank Identification Level is taken as 2`. The importer does not rewrite anything else, text included, even text reading a number, which Excel shows the same: it stops the run before anything is written or uploaded, listing each row to correct in the source file with its cell value:
+- The sheet must have an "Identification Level" column before the sample columns, and the data dictionary that field; otherwise the run stops before reading any rows. In every row with results, the cell must hold a number, uploaded as written, or be blank, uploaded as `2` and listed in the run log: `row 3, column B "Identification Level": Cell value: blank. Imported as "2", because a blank Identification Level is taken as 2.`. The importer does not rewrite anything else, text included, even text reading a number, which Excel shows the same: it stops the run before anything is written or uploaded, listing each row to correct in the source file with its cell value:
 
   ```
   The sheet "Analytical results" has 2 row(s) whose Identification Level is not a number. A blank one is taken as 2: correct these cells in the source file and try again:
@@ -142,7 +142,7 @@ Each result's "Detection characterisation" is worked out from its row's "Concent
 | none | `X` | detected qualitatively (taken as Peak Area; the units stay empty) |
 | items | a whole number, 0 or more | detected quantitatively |
 
-- Where the result's characterisation differs from the sheet's own, the run log says so, with the cell value and the reason: `row 2, column AQ "24019033": Cell value: "<LOQ"; Detection characterisation "detected, not quantified" instead of "detected quantitatively": below the Limit of quantification`, or `...: Cell value: 0.05; Detection characterisation "not detected" instead of "detected quantitatively": below the Limit of detection (0.1)`.
+- Where the result's characterisation differs from the sheet's own, the run log says so, with the cell value and the reason, and the question it depends on, if any: `row 2, column AQ "24019033": Cell value: "<LOQ". Imported with Detection characterisation "detected, not quantified" instead of the sheet's "detected quantitatively", because "<LOQ" means detected, but below the Limit of quantification. See Q1.`, or `...: Cell value: 0.05. Imported with Detection characterisation "not detected" instead of the sheet's "detected quantitatively", because the value is below the Limit of detection (0.1).`
 - Rows in ng/mL (matched ignoring case and spaces) are skipped: only ng/L is imported. Sheets keep them beside the ng/L rows calculated from them by formulas, which the importer reads as the values Excel saved, so the source file needs no change. Each ng/mL row's values must be in an ng/L row of the sheet: the same text (ignoring case and spaces), and its numbers x1000 in the limits and the sample columns, to 6 significant digits. Where the ng/mL row is blank or holds an Excel error, the ng/L row may hold anything (such as a Classification). The summary counts the skipped rows, and the run log lists each, with its ng/L row:
 
   ```
@@ -152,7 +152,15 @@ Each result's "Detection characterisation" is worked out from its row's "Concent
   ```
 
   An ng/mL row whose values no ng/L row holds stops the run, naming the ng/L row differing from it in the fewest cells, as a formula there may point at the wrong row. An ng/mL row's identification level is not checked, as it is not imported.
-- What is not clear yet is not imported: the cell gives no row, the run log lists it, and asks the data owners one question per kind of case, with the number of cells. The importer prints how many questions there are. These are: an ng/L row without both limits, a number in a Peak Area row, `X` in an ng/L row (X is a Peak Area result), an items result that is not a whole number of 0 or more, other units (such as ug/kg), any other result without units or with a marker that has no characterisation. "detected, not quantified" is also asked about, as the template's dropdown list has "detected semiquantitatively" instead.
+- What is not clear yet is not imported: the cell gives no row, and the run log lists it with the number of its question (`... Not imported, because "X" is a Peak Area result, but the row is in ng/L. See Q2.`). The questions are printed and logged once each, numbered, with the number of cells:
+
+  ```
+  Questions to data owners:
+  Q1 (14 cells): Results between the Limit of detection and the Limit of quantification, and "<LOQ" results, are imported as "detected, not quantified". The template's dropdown list does not have this value: it has "detected semiquantitatively". Which should be used?
+  Q2 (3 cells): X results in ng/L rows are not imported, as X is a Peak Area result. Are the units or the results wrong?
+  ```
+
+  The questions are: an ng/L row without both limits, a number in a Peak Area row, `X` in an ng/L row (X is a Peak Area result), an items result that is not a whole number of 0 or more, other units (such as ug/kg), any other result without units or with a marker that has no characterisation. "detected, not quantified" is also asked about, as the template's dropdown list has "detected semiquantitatively" instead.
 
 ### Keeping extra columns
 
@@ -272,10 +280,10 @@ Every run writes a log in the current directory, named exactly like the run's CS
 - Every change made to a cell instead of taking it as written, one line per cell with its value and its reason, so the data can be checked and corrected at its source:
 
 ```
-3 cell change(s), each with its reason:
-  row 2, column E "ST01": Cell value: "<loq:0.25"; written as "<LOQ": the number after the marker is the row's Limit of quantification
-  row 2, column F "ST02": Cell value: "ns"; no row: no sample
-  row 3, column E "ST01": Cell value: #VALUE! (Excel error); emptied: a failed calculation, read as a blank cell
+3 cell(s) not imported exactly as written:
+  row 2, column E "ST01": Cell value: "<loq:0.25". Imported as "<LOQ", because the number after the marker is the row's Limit of quantification.
+  row 2, column F "ST02": Cell value: "ns". Not imported, because no sample was taken.
+  row 3, column E "ST01": Cell value: #VALUE! (Excel error). Imported as a blank cell, because an Excel error is a failed calculation.
 ```
 
 Every line naming a cell gives its value the same way: text in quotes, exactly as written, spaces included, so that text reading a number (`"0.3"`) cannot be taken for the number (`0.3`); `blank` for an empty cell; and an Excel error as `#VALUE! (Excel error)`.

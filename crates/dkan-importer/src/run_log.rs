@@ -3,37 +3,42 @@
 //! at its source. One file per run, named like the run's CSV file (see
 //! [`crate::utils::RunFiles`]).
 
-use excel_core::{Change, NgPerMlRow, Question};
+use excel_core::{NgPerMlRow, Question};
 use std::fs::File;
 use std::io::{self, Write};
 
-/// The run log's lines for `changes`: one per cell, as a sheet can have thousands
-pub fn changes_lines(changes: &[Change]) -> Vec<String> {
+/// The run log's lines for `changes`, each its line as written by
+/// [`excel_core::ExcelValidator::change_lines`]: one per cell, as a sheet can have thousands
+pub fn changes_lines(changes: &[String]) -> Vec<String> {
     if changes.is_empty() {
-        return vec!["No cell changed: every cell was taken as written.".to_string()];
+        return vec!["Every cell was imported as written.".to_string()];
     }
     let mut lines = vec![format!(
-        "{} cell change(s), each with its reason:",
+        "{} cell(s) not imported exactly as written:",
         changes.len()
     )];
     lines.extend(changes.iter().map(|change| format!("  {change}")));
     lines
 }
 
-/// The run log's lines for `questions`, each with the number of cells concerned; none without
-/// questions
+/// The questions to the data owners, numbered as the cells refer to them ("See Q1."), each with
+/// the number of cells concerned; none without questions
 pub fn questions_lines(questions: &[(Question, usize)]) -> Vec<String> {
     if questions.is_empty() {
         return Vec::new();
     }
-    let mut lines = vec![format!(
-        "{} question(s) about the data, for the data owners to answer. The cells concerned are listed above.",
-        questions.len()
-    )];
+    let mut lines = vec!["Questions to data owners:".to_string()];
     lines.extend(
         questions
             .iter()
-            .map(|(question, cells)| format!("  [{cells} cell(s)] {question}")),
+            .enumerate()
+            .map(|(index, (question, cells))| {
+                let cells = match cells {
+                    1 => "1 cell".to_string(),
+                    cells => format!("{cells} cells"),
+                };
+                format!("Q{} ({cells}): {question}", index.saturating_add(1))
+            }),
     );
     lines
 }
@@ -105,9 +110,7 @@ impl<L: Write, O: Write, E: Write> RunLog<L, O, E> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use excel_core::{
-        CellValue, ChangeKind, Closest, Counterpart, Difference, SheetCell, SkipReason,
-    };
+    use excel_core::{CellValue, Closest, Counterpart, Difference, SheetCell};
     use std::num::NonZeroUsize;
 
     fn cell() -> SheetCell {
@@ -121,46 +124,36 @@ mod tests {
     #[test]
     fn changes_are_counted_and_listed_one_per_line() {
         let changes = [
-            Change {
-                cell: cell(),
-                value: CellValue::Text("NS".to_string()),
-                kind: ChangeKind::Skipped(SkipReason::NoSample),
-            },
-            Change {
-                cell: cell(),
-                value: CellValue::Number(1234.0),
-                kind: ChangeKind::Skipped(SkipReason::Open {
-                    question: Question::NumberInPeakArea,
-                    reason: "a number in a Peak Area row".to_string(),
-                }),
-            },
+            "row 4, column L \"ST03\": Cell value: \"NS\". Not imported, because no sample was taken.".to_string(),
+            "row 5, column L \"ST03\": Cell value: 1234. Not imported, because a number in a Peak Area row has no meaning yet. See Q1.".to_string(),
         ];
 
         let expected = vec![
-            "2 cell change(s), each with its reason:",
-            "  row 4, column L \"ST03\": Cell value: \"NS\"; no row: no sample",
-            "  row 4, column L \"ST03\": Cell value: 1234; no row: a number in a Peak Area row",
+            "2 cell(s) not imported exactly as written:",
+            "  row 4, column L \"ST03\": Cell value: \"NS\". Not imported, because no sample was taken.",
+            "  row 5, column L \"ST03\": Cell value: 1234. Not imported, because a number in a Peak Area row has no meaning yet. See Q1.",
         ];
         assert_eq!(changes_lines(&changes), expected);
     }
 
     #[test]
-    fn without_changes_the_log_says_every_cell_was_taken_as_written() {
-        let expected = vec!["No cell changed: every cell was taken as written."];
+    fn without_changes_the_log_says_every_cell_was_imported_as_written() {
+        let expected = vec!["Every cell was imported as written."];
         assert_eq!(changes_lines(&[]), expected);
     }
 
+    /// Numbered as the cells refer to them, "See Q1."
     #[test]
-    fn questions_are_listed_once_each_with_their_cell_count() {
+    fn questions_are_numbered_each_with_its_cell_count() {
         let questions = [
-            (Question::NumberInPeakArea, 3),
+            (Question::NumberInPeakArea, 1),
             (Question::OtherUnits("ug/kg".to_string()), 12),
         ];
 
         let expected = vec![
-            "2 question(s) about the data, for the data owners to answer. The cells concerned are listed above.",
-            "  [3 cell(s)] Numbers in Peak Area rows are not imported. Should they be imported as the Concentration, with which detection characterisation, and should a field mark them as peak areas?",
-            "  [12 cell(s)] Rows with Concentration units \"ug/kg\" are not imported. How should they be handled?",
+            "Questions to data owners:",
+            "Q1 (1 cell): Numbers in Peak Area rows are not imported. Should they be imported as the Concentration, with which detection characterisation, and should a field mark them as peak areas?",
+            "Q2 (12 cells): Rows with Concentration units \"ug/kg\" are not imported. How should they be handled?",
         ];
         assert_eq!(questions_lines(&questions), expected);
     }

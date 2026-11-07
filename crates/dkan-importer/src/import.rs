@@ -279,19 +279,10 @@ fn steps<E: Environment, L: Write, O: Write, R: Write>(
         log.info(&format!("✅ {summary}"))?;
     }
     log.notes(&ng_per_ml_rows_lines(validator.ng_per_ml_rows()))?;
-    log.notes(&changes_lines(validator.changes()))?;
-    let questions = validator.questions();
-    if !questions.is_empty() {
-        let cells: usize = questions
-            .iter()
-            .map(|(_, cells)| *cells)
-            .fold(0, usize::saturating_add);
-        log.info(&format!(
-            "❓ {} question(s) about the data, concerning {} cell(s) not imported or imported on an assumption: see the run log",
-            questions.len(),
-            cells
-        ))?;
-        log.notes(&questions_lines(questions))?;
+    log.notes(&changes_lines(&validator.change_lines()))?;
+    // Printed as well as logged: the data owners have to answer them
+    for line in questions_lines(validator.questions()) {
+        log.info(&line)?;
     }
     if let Err(refused) = validator.validate_excel() {
         let mut message = refused.to_string();

@@ -361,7 +361,7 @@ fn a_valid_sheet_is_uploaded_and_added_as_a_new_distribution() {
     let printed = format!("✅ Validation completed!\n{closing}");
     assert_eq!(outcome.stdout, printed);
     let logged = format!(
-        "{}No cell changed: every cell was taken as written.\n{printed}",
+        "{}Every cell was imported as written.\n{printed}",
         header_with_names()
     );
     assert_eq!(outcome.log, logged);
@@ -715,7 +715,7 @@ fn a_dataset_name_that_cannot_be_read_is_explained_at_the_top_and_the_run_goes_o
 
     assert_eq!(outcome.error, None);
     let expected = format!(
-        "{}No cell changed: every cell was taken as written.\n",
+        "{}Every cell was imported as written.\n",
         header("(not read: DKAN refused the DatasetTitle)", "Samples")
     );
     assert!(outcome.log.starts_with(&expected), "{}", outcome.log);
@@ -761,4 +761,43 @@ fn the_top_of_the_log_names_the_file_without_its_path() {
     let expected =
         "Cannot read the Excel file \"data/2026/samples.xlsx\": no file data/2026/samples.xlsx";
     assert_eq!(outcome.error.as_deref(), Some(expected));
+}
+
+/// The questions to the data owners are printed as well as logged, numbered
+#[test]
+fn the_questions_are_printed_and_logged_numbered() {
+    let sheet = test_workbook(&[
+        vec![
+            Text("Substance"),
+            Text("Identification Level"),
+            Text("Detection characterisation"),
+            Text("Concentration units"),
+            Text("Limit of detection"),
+            Text("Limit of quantification"),
+            Text("ST01"),
+        ],
+        vec![
+            Text("Okadaic acid"),
+            Number(2.0),
+            Empty,
+            Text("ng/L"),
+            Number(0.1),
+            Number(0.25),
+            Text("<LOQ"),
+        ],
+    ]);
+    let mut dkan = dkan(None, None);
+    dkan.dictionary = analytical_dictionary();
+    let mut import = import();
+    import.unpivot = Some(unpivot());
+
+    let outcome = run_import(&import, environment(sheet, dkan));
+
+    assert_eq!(outcome.error, None);
+    let questions = "Questions to data owners:
+Q1 (1 cell): Results between the Limit of detection and the Limit of quantification, and \"<LOQ\" results, are imported as \"detected, not quantified\". The template's dropdown list does not have this value: it has \"detected semiquantitatively\". Which should be used?
+";
+    assert!(outcome.stdout.contains(questions), "{}", outcome.stdout);
+    assert!(outcome.log.contains(questions), "{}", outcome.log);
+    assert!(!outcome.log.contains("see the run log"), "{}", outcome.log);
 }

@@ -118,11 +118,7 @@ fn run_with_schema(
         .ok_or("an unpivoted sheet must have a summary")?
         .to_string();
     let error_cells = validator.error_cells_summary().map(String::from);
-    let changes = validator
-        .changes()
-        .iter()
-        .map(ToString::to_string)
-        .collect();
+    let changes = validator.change_lines();
     let questions = validator
         .questions()
         .iter()
@@ -794,9 +790,9 @@ fn nd_cells_are_treated_as_ns_and_give_no_row() {
     ];
     assert_eq!(unpivoted.csv_lines, expected);
     let expected = vec![
-        "row 2, column F \"ST01\": Cell value: \"ND\"; no row: treated as NS (no sample)",
-        "row 2, column G \"ST02\": Cell value: \" nd \"; no row: treated as NS (no sample)",
-        "row 2, column H \"ST03\": Cell value: \"NS\"; no row: no sample",
+        "row 2, column F \"ST01\": Cell value: \"ND\". Not imported, because it is taken as NS: no sample was taken.",
+        "row 2, column G \"ST02\": Cell value: \" nd \". Not imported, because it is taken as NS: no sample was taken.",
+        "row 2, column H \"ST03\": Cell value: \"NS\". Not imported, because no sample was taken.",
     ];
     assert_eq!(unpivoted.changes, expected);
     assert!(
@@ -1064,8 +1060,8 @@ fn a_blank_identification_level_is_filled_with_2_and_listed() {
     ];
     assert_eq!(unpivoted.columns(&LEVEL_COLUMNS), expected);
     let expected = vec![
-        "row 2, column B \"Identification Level\": Cell value: blank; written as \"2\": a blank Identification Level is taken as 2",
-        "row 3, column B \"Identification Level\": Cell value: \"  \"; written as \"2\": a blank Identification Level is taken as 2",
+        "row 2, column B \"Identification Level\": Cell value: blank. Imported as \"2\", because a blank Identification Level is taken as 2.",
+        "row 3, column B \"Identification Level\": Cell value: \"  \". Imported as \"2\", because a blank Identification Level is taken as 2.",
     ];
     assert_eq!(unpivoted.changes, expected);
 }
@@ -1160,10 +1156,10 @@ fn every_change_to_a_sample_cell_is_listed_with_its_reason() {
     let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
-        "row 2, column F \"ST01\": Cell value: \"<loq:0.25\"; written as \"<LOQ\": the number after the marker is the row's Limit of quantification",
-        "row 2, column G \"ST02\": Cell value: \" ns \"; no row: no sample",
-        "row 3, column F \"ST01\": Cell value: #VALUE! (Excel error); emptied: a failed calculation, read as a blank cell",
-        "row 3, column G \"ST02\": Cell value: \"<lod\"; written as \"<LOD\": markers are written uppercase",
+        "row 2, column F \"ST01\": Cell value: \"<loq:0.25\". Imported as \"<LOQ\", because the number after the marker is the row's Limit of quantification.",
+        "row 2, column G \"ST02\": Cell value: \" ns \". Not imported, because no sample was taken.",
+        "row 3, column F \"ST01\": Cell value: #VALUE! (Excel error). Imported as a blank cell, because an Excel error is a failed calculation.",
+        "row 3, column G \"ST02\": Cell value: \"<lod\". Imported as \"<LOD\", because markers are written in capitals.",
     ];
     assert_eq!(unpivoted.changes, expected);
 }
@@ -1251,7 +1247,7 @@ fn ng_l_results_are_characterised_against_the_rows_limits() {
     ];
     assert_eq!(unpivoted.columns(&RESULTS), expected);
     let expected = vec![
-        "4 cell(s): Results between the Limit of detection and the Limit of quantification, and <LOQ, are characterised as \"detected, not quantified\", which the template's dropdown list does not have (it has \"detected semiquantitatively\"). Which should be used?",
+        "4 cell(s): Results between the Limit of detection and the Limit of quantification, and \"<LOQ\" results, are imported as \"detected, not quantified\". The template's dropdown list does not have this value: it has \"detected semiquantitatively\". Which should be used?",
     ];
     assert_eq!(unpivoted.questions, expected);
 }
@@ -1331,8 +1327,8 @@ fn items_that_are_not_whole_numbers_give_no_row_and_a_question() {
     ];
     assert_eq!(unpivoted.columns(&RESULTS), expected);
     let expected = vec![
-        "row 2, column G \"ST01\": Cell value: 1.5; no row: not a whole number of items",
-        "row 2, column H \"ST02\": Cell value: \"<LOD\"; no row: not a whole number of items",
+        "row 2, column G \"ST01\": Cell value: 1.5. Not imported, because the row counts items, and this is not a whole number of 0 or more. See Q1.",
+        "row 2, column H \"ST02\": Cell value: \"<LOD\". Not imported, because the row counts items, and this is not a whole number of 0 or more. See Q1.",
     ];
     assert_eq!(unpivoted.changes, expected);
     let expected = vec![
@@ -1363,7 +1359,9 @@ fn x_in_an_ng_l_row_gives_no_row_and_a_question() {
         "ST02,0.3,detected quantitatively",
     ];
     assert_eq!(unpivoted.columns(&RESULTS), expected);
-    let expected = vec!["row 2, column G \"ST01\": Cell value: \"X\"; no row: X in an ng/L row"];
+    let expected = vec![
+        "row 2, column G \"ST01\": Cell value: \"X\". Not imported, because \"X\" is a Peak Area result, but the row is in ng/L. See Q1.",
+    ];
     assert_eq!(unpivoted.changes, expected);
     let expected = vec![
         "1 cell(s): X results in ng/L rows are not imported, as X is a Peak Area result. Are the units or the results wrong?",
@@ -1402,12 +1400,12 @@ fn unclear_results_give_no_row_and_a_question() {
     ];
     assert_eq!(unpivoted.columns(&RESULTS), expected);
     let expected = vec![
-        "row 2, column G \"ST01\": Cell value: 0.3; no row: the ng/L row has no Limit of detection or no Limit of quantification, so its results cannot be characterised",
-        "row 3, column G \"ST01\": Cell value: 1234; no row: a number in a Peak Area row",
-        "row 4, column G \"ST01\": Cell value: 0.3; no row: Concentration units \"ug/kg\" are not imported",
-        "row 5, column G \"ST01\": Cell value: 0.3; no row: a number in a row without Concentration units",
-        "row 6, column G \"ST01\": Cell value: \"<LOD\"; no row: \"<LOD\" in a row with Concentration units \"Peak Area\"",
-        "row 7, column G \"ST01\": Cell value: \"<LOQ\"; no row: Concentration units \"ug/kg\" are not imported",
+        "row 2, column G \"ST01\": Cell value: 0.3. Not imported, because the ng/L row has no Limit of detection or no Limit of quantification, so its results cannot be characterised. See Q1.",
+        "row 3, column G \"ST01\": Cell value: 1234. Not imported, because a number in a Peak Area row has no meaning yet. See Q2.",
+        "row 4, column G \"ST01\": Cell value: 0.3. Not imported, because Concentration units \"ug/kg\" are not imported. See Q3.",
+        "row 5, column G \"ST01\": Cell value: 0.3. Not imported, because a number in a row without Concentration units has no meaning yet. See Q5.",
+        "row 6, column G \"ST01\": Cell value: \"<LOD\". Not imported, because \"<LOD\" in a row with Concentration units \"Peak Area\" has no meaning yet. See Q4.",
+        "row 7, column G \"ST01\": Cell value: \"<LOQ\". Not imported, because Concentration units \"ug/kg\" are not imported. See Q3.",
     ];
     assert_eq!(unpivoted.changes, expected);
     let expected = vec![
@@ -1478,15 +1476,15 @@ fn a_characterisation_that_differs_from_the_sheets_is_listed_with_what_the_cell_
     let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
-        "row 2, column G \"ST01\": Cell value: 0.3; Detection characterisation \"detected quantitatively\" instead of \"not detected\": at least the Limit of quantification (0.25)",
-        "row 2, column H \"ST02\": Cell value: \"<loq\"; written as \"<LOQ\": markers are written uppercase",
-        "row 2, column H \"ST02\": Cell value: \"<loq\"; Detection characterisation \"detected, not quantified\" instead of \"not detected\": below the Limit of quantification",
-        "row 2, column I \"ST03\": Cell value: 0.2; Detection characterisation \"detected, not quantified\" instead of \"not detected\": between the Limit of detection (0.1) and the Limit of quantification (0.25)",
-        "row 3, column G \"ST01\": Cell value: 0.05; Detection characterisation \"not detected\" instead of \"detected quantitatively\": below the Limit of detection (0.1)",
-        "row 3, column H \"ST02\": Cell value: \"<LOD\"; Detection characterisation \"not detected\" instead of \"detected quantitatively\": below the Limit of detection",
-        "row 4, column G \"ST01\": Cell value: \"X\"; Detection characterisation \"detected qualitatively\" instead of \"not detected\": X in a Peak Area row",
-        "row 5, column G \"ST01\": Cell value: \"X\"; Detection characterisation \"detected qualitatively\" instead of \"not detected\": X in a row without Concentration units, taken as Peak Area",
-        "row 6, column G \"ST01\": Cell value: 3; Detection characterisation \"detected quantitatively\" instead of \"not detected\": a count of items",
+        "row 2, column G \"ST01\": Cell value: 0.3. Imported with Detection characterisation \"detected quantitatively\" instead of the sheet's \"not detected\", because the value is at least the Limit of quantification (0.25).",
+        "row 2, column H \"ST02\": Cell value: \"<loq\". Imported as \"<LOQ\", because markers are written in capitals.",
+        "row 2, column H \"ST02\": Cell value: \"<loq\". Imported with Detection characterisation \"detected, not quantified\" instead of the sheet's \"not detected\", because \"<LOQ\" means detected, but below the Limit of quantification. See Q2.",
+        "row 2, column I \"ST03\": Cell value: 0.2. Imported with Detection characterisation \"detected, not quantified\" instead of the sheet's \"not detected\", because the value is between the Limit of detection (0.1) and the Limit of quantification (0.25). See Q2.",
+        "row 3, column G \"ST01\": Cell value: 0.05. Imported with Detection characterisation \"not detected\" instead of the sheet's \"detected quantitatively\", because the value is below the Limit of detection (0.1).",
+        "row 3, column H \"ST02\": Cell value: \"<LOD\". Imported with Detection characterisation \"not detected\" instead of the sheet's \"detected quantitatively\", because \"<LOD\" means below the Limit of detection.",
+        "row 4, column G \"ST01\": Cell value: \"X\". Imported with Detection characterisation \"detected qualitatively\" instead of the sheet's \"not detected\", because \"X\" in a Peak Area row means detected, without a concentration.",
+        "row 5, column G \"ST01\": Cell value: \"X\". Imported with Detection characterisation \"detected qualitatively\" instead of the sheet's \"not detected\", because the row has no Concentration units, so \"X\" is taken as a Peak Area result. See Q1.",
+        "row 6, column G \"ST01\": Cell value: 3. Imported with Detection characterisation \"detected quantitatively\" instead of the sheet's \"not detected\", because the row counts items.",
     ];
     assert_eq!(unpivoted.changes, expected);
 }
@@ -1556,11 +1554,7 @@ fn every_problem_is_reported_in_one_run_with_the_changes_and_questions() {
         .unpivot(spec())
         .build()
         .unwrap_or_else(|e| panic!("the problems must not stop the build: {e:#}"));
-    let changes: Vec<String> = validator
-        .changes()
-        .iter()
-        .map(ToString::to_string)
-        .collect();
+    let changes: Vec<String> = validator.change_lines();
     let questions: Vec<String> = validator
         .questions()
         .iter()
@@ -1572,8 +1566,8 @@ fn every_problem_is_reported_in_one_run_with_the_changes_and_questions() {
         .to_string();
 
     let expected = vec![
-        "row 2, column G \"ST01\": Cell value: \"X\"; no row: X in an ng/L row",
-        "row 4, column G \"ST01\": Cell value: 1.5; no row: not a whole number of items",
+        "row 2, column G \"ST01\": Cell value: \"X\". Not imported, because \"X\" is a Peak Area result, but the row is in ng/L. See Q1.",
+        "row 4, column G \"ST01\": Cell value: 1.5. Not imported, because the row counts items, and this is not a whole number of 0 or more. See Q2.",
     ];
     assert_eq!(changes, expected);
     // X in ng/L, the 1.5 items, and "detected, not quantified" for row 2's 0.2
@@ -1607,11 +1601,7 @@ fn run_ng_per_ml(rows: &[Vec<Cell>]) -> NgPerMlRun {
             .iter()
             .map(ToString::to_string)
             .collect(),
-        changes: validator
-            .changes()
-            .iter()
-            .map(ToString::to_string)
-            .collect(),
+        changes: validator.change_lines(),
         summary: validator.unpivot_summary().unwrap_or_default().to_string(),
         error: validator.validate_excel().err().map(|e| e.to_string()),
     }
