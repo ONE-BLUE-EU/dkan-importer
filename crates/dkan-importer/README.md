@@ -232,7 +232,7 @@ Example Excel structure:
 3. **Schema Retrieval**: Fetches the specified data dictionary from DKAN
 4. **Schema Conversion**: Converts DKAN data dictionary to JSON Schema
 5. **Validation**: Validates each Excel row against the schema; refused rows stop the run before anything is uploaded
-6. **CSV Export**: Exports valid data to a timestamped CSV file, in memory
+6. **CSV Export**: Saves valid data to a timestamped CSV file in the current directory, beside the run log; a CSV file that cannot be saved stops the run before the upload
 7. **Upload**: Uploads the CSV file to DKAN's custom importer endpoint
 8. **Distribution**: Adds the uploaded CSV as a distribution to the specified dataset, replacing the one its data dictionary describes, whose file is then deleted
 
@@ -248,11 +248,11 @@ Example Excel structure:
 - Last, in every run, whether it succeeded or stopped, what became of the CSV file and of the upload, also at the end of the run log:
 
   ```
-  ✅ CSV file generated: analytical_results_(i)_2026-11-07_14-52-21_9e94380f-73d5-4655-9a0f-519adbff655c.csv (3312 row(s))
+  ✅ CSV file saved: analytical_results_(i)_2026-11-07_14-52-21_9e94380f-73d5-4655-9a0f-519adbff655c.csv (3312 row(s))
   ✅ Uploaded analytical_results_(i)_2026-11-07_14-52-21_9e94380f-73d5-4655-9a0f-519adbff655c.csv and added it to dataset "Arctic Ocean - Arctic Ocean - 2023" (9e94380f-73d5-4655-9a0f-519adbff655c) as a new distribution
   ```
 
-  The CSV file is generated in memory, and uploaded under that name without being written locally. A run that stops ends instead with `❌ CSV file not generated` and `❌ Nothing uploaded`; one that stops later says how far it got: the CSV generated but not uploaded (`❌ Nothing uploaded`), uploaded to its URL but not added to the dataset (`❌ Uploaded ... to <url>, but not added to dataset ...`), or added in place of a distribution whose file could not be deleted (`⚠️  Uploaded ..., replacing old.csv, whose file could not be deleted`). When it replaces one, the line says so: `..., replacing old.csv, whose file was deleted`.
+  The CSV file is saved in the current directory, beside the run log, before it is uploaded under the same name, so the file sent is kept even when the upload fails. A run that stops ends instead with `❌ CSV file not generated` and `❌ Nothing uploaded`; one that stops later says how far it got: the CSV generated but not saved (`❌ CSV file generated (3312 row(s)), but not saved as ...`, and nothing uploaded), saved but not uploaded (`❌ Nothing uploaded`), uploaded to its URL but not added to the dataset (`❌ Uploaded ... to <url>, but not added to dataset ...`), or added in place of a distribution whose file could not be deleted (`⚠️  Uploaded ..., replacing old.csv, whose file could not be deleted`). When it replaces one, the line says so: `..., replacing old.csv, whose file was deleted`.
 
 ### Run Log File
 Every run writes a log in the current directory, named exactly like the run's CSV file but ending in `.run.log`: `<sheet>_<YYYY-MM-DD_HH-MM-SS>_<dataset>.run.log`, lowercase, with the sheet name's spaces as `_`, as in `analytical_results_(i)_2026-11-05_10-00-00_some-dataset.run.log`. Each run writes its own log; the newest describes the latest run. It is written even when the run stops, and never contains the password. It holds:
@@ -314,7 +314,7 @@ Errors:
 ```
 
 ### CSV Output
-Valid data is exported to a CSV file, built in memory and uploaded without being written locally, named:
+Valid data is saved to a CSV file in the current directory, beside the run log, and uploaded under the same name:
 ```
 <sheet>_<YYYY-MM-DD_HH-MM-SS>_<dataset>.csv
 ```

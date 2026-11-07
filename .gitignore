@@ -1,3 +1,5 @@
 /target
 data/
 *.run.log
+# The CSV file each run saves beside its run log
+/*.csv

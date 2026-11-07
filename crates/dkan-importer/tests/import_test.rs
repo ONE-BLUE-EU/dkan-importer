@@ -132,6 +132,9 @@ struct FakeEnvironment {
     /// Each entry appended to the error log: its title and details
     error_log: Vec<(String, String)>,
     error_log_fails: bool,
+    /// Each CSV file saved: its name and contents
+    saved_csv: Vec<(String, String)>,
+    saving_csv_fails: bool,
 }
 
 impl Environment for FakeEnvironment {
@@ -149,6 +152,17 @@ impl Environment for FakeEnvironment {
         self.dkan
             .take()
             .ok_or_else(|| anyhow::anyhow!("connected twice"))
+    }
+
+    fn save_csv(&mut self, file_name: &str, csv: &[u8]) -> io::Result<()> {
+        if self.saving_csv_fails {
+            return Err(io::Error::other("disk full"));
+        }
+        self.saved_csv.push((
+            file_name.to_string(),
+            String::from_utf8_lossy(csv).to_string(),
+        ));
+        Ok(())
     }
 
     fn append_error_log(&mut self, title: &str, details: &str) -> io::Result<()> {
@@ -171,6 +185,7 @@ struct Outcome {
     stderr: String,
     connections: Vec<(String, String)>,
     error_log: Vec<(String, String)>,
+    saved_csv: Vec<(String, String)>,
 }
 
 /// A sample sheet's data dictionary: Sample ID (required) and Depth
@@ -219,6 +234,8 @@ fn environment(excel: Vec<u8>, dkan: FakeDkan) -> FakeEnvironment {
         connections: Vec::new(),
         error_log: Vec::new(),
         error_log_fails: false,
+        saved_csv: Vec::new(),
+        saving_csv_fails: false,
     }
 }
 
@@ -256,6 +273,7 @@ fn run_import(import: &Import, mut environment: FakeEnvironment) -> Outcome {
         stderr,
         connections: environment.connections,
         error_log: environment.error_log,
+        saved_csv: environment.saved_csv,
     }
 }
 
@@ -288,7 +306,7 @@ fn closing(csv: &str, upload: &str) -> String {
     format!("\n{csv}\n{upload}\n")
 }
 
-const CSV_GENERATED: &str = "✅ CSV file generated: samples_ds-1.csv (2 row(s))";
+const CSV_GENERATED: &str = "✅ CSV file saved: samples_ds-1.csv (2 row(s))";
 const CSV_NOT_GENERATED: &str = "❌ CSV file not generated";
 const NOTHING_UPLOADED: &str = "❌ Nothing uploaded";
 
@@ -349,6 +367,8 @@ fn a_valid_sheet_is_uploaded_and_added_as_a_new_distribution() {
     assert_eq!(outcome.log, logged);
     assert_eq!(outcome.stderr, "");
     assert!(outcome.error_log.is_empty());
+    let expected = vec![(CSV_FILE_NAME.to_string(), VALID_CSV.to_string())];
+    assert_eq!(outcome.saved_csv, expected);
 }
 
 #[test]
@@ -489,6 +509,7 @@ fn rows_failing_validation_go_to_the_error_log_and_nothing_is_uploaded() {
         outcome.stdout
     );
     assert!(outcome.log.ends_with(&nothing_done()), "{}", outcome.log);
+    assert!(outcome.saved_csv.is_empty());
 }
 
 #[test]
@@ -606,6 +627,29 @@ fn a_failed_upload_stops_the_run_before_the_distribution_is_added() {
     ];
     assert_eq!(outcome.calls, expected);
     let printed = closing(CSV_GENERATED, NOTHING_UPLOADED);
+    assert!(outcome.stdout.ends_with(&printed), "{}", outcome.stdout);
+    assert!(outcome.log.ends_with(&printed), "{}", outcome.log);
+    // Saved before the upload, so the file sent is there to open
+    let expected = vec![(CSV_FILE_NAME.to_string(), VALID_CSV.to_string())];
+    assert_eq!(outcome.saved_csv, expected);
+}
+
+/// Nothing is uploaded that is not also saved
+#[test]
+fn a_csv_file_that_cannot_be_saved_stops_the_run_before_the_upload() {
+    let mut environment = environment(valid_sheet(), dkan(None, None));
+    environment.saving_csv_fails = true;
+
+    let outcome = run_import(&import(), environment);
+
+    let expected = "Cannot save the CSV file \"samples_ds-1.csv\": disk full";
+    assert_eq!(outcome.error.as_deref(), Some(expected));
+    let expected = vec![Call::CheckLogin, dataset_title(), data_dictionary()];
+    assert_eq!(outcome.calls, expected);
+    let printed = closing(
+        "❌ CSV file generated (2 row(s)), but not saved as samples_ds-1.csv",
+        NOTHING_UPLOADED,
+    );
     assert!(outcome.stdout.ends_with(&printed), "{}", outcome.stdout);
     assert!(outcome.log.ends_with(&printed), "{}", outcome.log);
 }

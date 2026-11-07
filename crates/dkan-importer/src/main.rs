@@ -280,6 +280,10 @@ impl Environment for Terminal {
         Ok(HttpDkan::new(base_url, username, password, Client::new()))
     }
 
+    fn save_csv(&mut self, file_name: &str, csv: &[u8]) -> io::Result<()> {
+        std::fs::write(file_name, csv)
+    }
+
     fn append_error_log(&mut self, title: &str, details: &str) -> io::Result<()> {
         append_error_to_log(Path::new(ERRORS_LOG_FILE), title, details)
     }

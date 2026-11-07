@@ -12,7 +12,7 @@ A Cargo workspace of tools for getting Excel data into DKAN: one shared library 
 
 ### `dkan-importer`
 
-Fetches a data dictionary from a DKAN instance, converts it to JSON Schema, and checks each row of an Excel sheet against it. It uploads the valid rows as a timestamped CSV file, a distribution of an existing DKAN dataset; the CSV is built in memory, not written locally. Rows that fail validation are reported in `errors.log`.
+Fetches a data dictionary from a DKAN instance, converts it to JSON Schema, and checks each row of an Excel sheet against it. It saves the valid rows as a timestamped CSV file in the current directory and uploads that file as a distribution of an existing DKAN dataset. Rows that fail validation are reported in `errors.log`.
 
 ```bash
 cargo run -r -p dkan-importer -- \

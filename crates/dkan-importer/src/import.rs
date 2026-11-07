@@ -41,6 +41,9 @@ pub trait Environment {
     /// DKAN at `base_url`, logged in as `username`: asking for the password, unless it was given
     fn connect(&mut self, base_url: HttpsUrl, username: &str) -> Result<Self::Dkan>;
 
+    /// Save `csv`, the CSV file uploaded, as `file_name`, beside the run log
+    fn save_csv(&mut self, file_name: &str, csv: &[u8]) -> io::Result<()>;
+
     /// Append `details` to the error log under `title`
     fn append_error_log(&mut self, title: &str, details: &str) -> io::Result<()>;
 }
@@ -132,6 +135,11 @@ fn reach_dkan<E: Environment>(
 /// How far an import got, for the last lines of the run
 enum Progress {
     NothingGenerated,
+    /// The CSV file generated, but not saved, so not uploaded
+    CsvNotSaved {
+        rows: usize,
+    },
+    /// The CSV file generated and saved
     CsvGenerated {
         rows: usize,
     },
@@ -162,14 +170,17 @@ fn closing_lines(import: &Import, progress: &Progress) -> [String; 2] {
     let name = &import.csv_file_name;
     let csv = match progress {
         Progress::NothingGenerated => "❌ CSV file not generated".to_string(),
+        Progress::CsvNotSaved { rows } => {
+            format!("❌ CSV file generated ({rows} row(s)), but not saved as {name}")
+        }
         Progress::CsvGenerated { rows }
         | Progress::Uploaded { rows, .. }
-        | Progress::Added { rows, .. } => format!("✅ CSV file generated: {name} ({rows} row(s))"),
+        | Progress::Added { rows, .. } => format!("✅ CSV file saved: {name} ({rows} row(s))"),
     };
     let upload = match progress {
-        Progress::NothingGenerated | Progress::CsvGenerated { .. } => {
-            "❌ Nothing uploaded".to_string()
-        }
+        Progress::NothingGenerated
+        | Progress::CsvNotSaved { .. }
+        | Progress::CsvGenerated { .. } => "❌ Nothing uploaded".to_string(),
         Progress::Uploaded { file_url, .. } => format!(
             "❌ Uploaded {name} to {file_url}, but not added to dataset {}",
             import.dataset_id
@@ -303,6 +314,11 @@ fn steps<E: Environment, L: Write, O: Write, R: Write>(
         .to_csv(&title_to_name_mapping)
         .map_err(|e| format!("Failed to create CSV with error: {e}"))?;
     let rows = validator.rows().len();
+    *progress = Progress::CsvNotSaved { rows };
+    // Before the upload, so that the file sent is kept even if the upload fails
+    environment
+        .save_csv(&import.csv_file_name, &csv)
+        .map_err(|e| format!("Cannot save the CSV file \"{}\": {e}", import.csv_file_name))?;
     *progress = Progress::CsvGenerated { rows };
 
     let file_url = dkan.upload_csv(&import.csv_file_name, csv)?;
