@@ -5,13 +5,11 @@
 
 use clap::Parser;
 use dkan_importer::{
+    dkan::{HttpDkan, HttpsUrl, NewDistribution},
     error_log::{ERRORS_LOG_FILE, append_error_to_log},
     model::DataDictionary,
     run_log::{RunLog, changes_lines, ng_per_ml_rows_lines, questions_lines},
-    utils::{
-        RunFiles, check_upload_login, dataset_add_distribution, delete_remote_file,
-        upload_distribution_csv_file,
-    },
+    utils::RunFiles,
 };
 use excel_core::reqwest::blocking::Client;
 use excel_core::{
@@ -242,28 +240,21 @@ fn run(
     log.note(&format!("DKAN: {}", arguments.base_url))?;
 
     // Validate the url before asking for anything. It must be https because we are using basic auth.
-    if !arguments.base_url.starts_with("https://") {
-        return Err(format!(
-            "The URL must be https. The provided URL is: {}",
-            arguments.base_url
-        )
-        .into());
-    }
+    let base_url: HttpsUrl = arguments.base_url.parse()?;
 
     let password = match arguments.password {
         Some(password) => password,
         None => prompt_password("Password: ")
             .map_err(|e| format!("Failed to read the password: {e}"))?,
     };
-    let client = Client::new();
+    let dkan = HttpDkan::new(base_url, &arguments.username, password, Client::new());
     // A bad login must stop the run before anything is written
-    check_upload_login(&arguments.base_url, &arguments.username, &password, &client)?;
+    dkan.check_login()?;
     log.info(&format!(
         "✅ Login accepted for user \"{}\"",
         arguments.username
     ))?;
-    let data_dictionary =
-        DataDictionary::new(&arguments.base_url, &arguments.data_dictionary_id, &client)?;
+    let data_dictionary = dkan.data_dictionary(&arguments.data_dictionary_id)?;
     let json_schema = data_dictionary.to_json_schema()?;
     let title_to_name_mapping =
         DataDictionary::create_title_to_name_mapping(&data_dictionary.fields)?;
@@ -338,24 +329,15 @@ fn run(
         .map_err(|e| format!("Failed to create CSV with error: {e}"))?;
     log.info(&format!("✅ CSV file created: {csv_filename}"))?;
 
-    let file_url = upload_distribution_csv_file(
-        &arguments.base_url,
-        &csv_filename,
-        csv,
-        &arguments.username,
-        &password,
-        &client,
-    )?;
+    let file_url = dkan.upload_csv(&csv_filename, csv)?;
 
-    let added = dataset_add_distribution(
-        &arguments.base_url,
+    let added = dkan.add_distribution(
         &arguments.dataset_id,
-        &csv_filename,
-        &file_url,
-        &data_dictionary.url,
-        &arguments.username,
-        &password,
-        &client,
+        NewDistribution {
+            file_name: &csv_filename,
+            file_url: &file_url,
+            data_dictionary_url: &data_dictionary.url,
+        },
     )?;
     match &added.previous_csv_filename {
         Some(previous) => log.info(&format!(
@@ -370,13 +352,7 @@ fn run(
 
     // Clean up previous CSV file if one was replaced
     if let Some(previous_csv_filename) = added.previous_csv_filename {
-        delete_remote_file(
-            &arguments.base_url,
-            &previous_csv_filename,
-            &arguments.username,
-            &password,
-            &client,
-        )?;
+        dkan.delete_file(&previous_csv_filename)?;
         log.info(&format!(
             "🧹 Previous CSV file successfully deleted: {previous_csv_filename}"
         ))?;

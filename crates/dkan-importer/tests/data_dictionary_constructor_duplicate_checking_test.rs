@@ -1,12 +1,8 @@
-//! Tests for DataDictionary constructor duplicate checking functionality
-//! Verifies that DataDictionary::new() now checks for duplicates during construction
+//! Tests for the duplicate checking of data dictionary fields. The constructor itself,
+//! `DataDictionary::from_items`, is tested in `data_dictionary_from_items_test.rs`.
 
 use dkan_importer::model::DataDictionary;
 use excel_core::serde_json::json;
-
-// Mock test that simulates the constructor behavior
-// Since we can't easily mock the HTTP client in unit tests, we'll test the duplicate checking
-// logic that's now integrated into the constructor
 
 #[test]
 fn test_duplicate_checking_integration() {
@@ -27,9 +23,6 @@ fn test_duplicate_checking_integration() {
         ]
     });
 
-    // This should fail because check_duplicates is now called during construction
-    // We can't easily test the full constructor due to HTTP dependencies,
-    // but we can verify the duplicate checking logic works
     let result = DataDictionary::check_duplicates(&test_data_with_duplicates);
     assert!(
         result.is_err(),

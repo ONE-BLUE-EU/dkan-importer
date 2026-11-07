@@ -1,5 +1,5 @@
+use crate::dkan::HttpsUrl;
 use excel_core::anyhow;
-use excel_core::reqwest::blocking::Client;
 use excel_core::serde_json;
 use excel_core::serde_json::{Value, json};
 use excel_core::utils::normalize_string;
@@ -13,78 +13,55 @@ pub struct DataDictionary {
 }
 
 impl DataDictionary {
-    pub fn new(
-        base_url: &str,
-        data_dictionary_id: &str,
-        client: &Client,
-    ) -> Result<Self, excel_core::anyhow::Error> {
-        let url = format!("{base_url}/api/1/metastore/schemas/data-dictionary/items");
-        let response = client
-            .get(&url)
-            .header("Accept", "application/json")
-            .send()?;
-        let status = response.status();
-        let body = response.text()?;
-        if !status.is_success() {
-            return Err(anyhow::anyhow!(
-                "Failed to fetch the data dictionaries from {url}: HTTP {status}: {body}"
-            ));
-        }
-
+    /// The data dictionary `id` of the DKAN instance at `base_url`, from `items`, the body of the
+    /// list of its data dictionaries
+    pub fn from_items(base_url: &HttpsUrl, id: &str, items: &str) -> Result<Self, anyhow::Error> {
         // Parse the response as an array of schema objects
-        let schemas: Vec<Value> = serde_json::from_str(&body)?;
+        let schemas: Vec<Value> = serde_json::from_str(items).map_err(|e| {
+            anyhow::anyhow!("The list of data dictionaries is not a JSON array: {e}")
+        })?;
 
-        // Find the schema with matching title
         let matching_schema = schemas
             .into_iter()
             .find(|schema| {
                 schema
                     .get("identifier")
                     .and_then(|identifier| identifier.as_str())
-                    == Some(data_dictionary_id)
+                    == Some(id)
             })
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Data dictionary with identifier '{}' not found",
-                    data_dictionary_id
-                )
-            })?;
+            .ok_or_else(|| anyhow::anyhow!("Data dictionary with identifier '{id}' not found"))?;
 
         // Extract the data portion and convert to JSON Schema format
         let data = matching_schema
             .get("data")
             .ok_or_else(|| anyhow::anyhow!("Data dictionary data not found"))?;
 
-        let data_dictionary_url = format!(
-            "{base_url}/api/1/metastore/schemas/data-dictionary/items/{data_dictionary_id}"
-        );
-        // Todo: Validate the URL is correct.
-        let result = client.get(&data_dictionary_url).send()?;
-        if !result.status().is_success() {
-            return Err(anyhow::anyhow!(
-                "Failed to validate the existence of the data dictionary {data_dictionary_id}. \
-                Please check if the data dictionary exists and is accessible at {data_dictionary_url}"
-            ));
-        }
-
         let normalized_fields = Self::normalize_field_data(data.clone())?;
 
         // Check for duplicate field names and titles after normalization
         Self::check_duplicates(&normalized_fields)?;
 
-        return Ok(DataDictionary {
+        Ok(DataDictionary {
             // The schema was matched on this identifier above
-            id: data_dictionary_id.to_string(),
+            id: id.to_string(),
             name: data
                 .get("title")
                 .and_then(|name| name.as_str())
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Data dictionary '{data_dictionary_id}' has no title")
-                })?
+                .ok_or_else(|| anyhow::anyhow!("Data dictionary '{id}' has no title"))?
                 .to_string(),
             fields: normalized_fields,
-            url: data_dictionary_url,
-        });
+            url: base_url
+                .endpoint(&[
+                    "api",
+                    "1",
+                    "metastore",
+                    "schemas",
+                    "data-dictionary",
+                    "items",
+                    id,
+                ])
+                .to_string(),
+        })
     }
 
     /// Normalize field names and titles in the data dictionary structure
