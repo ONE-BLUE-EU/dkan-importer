@@ -189,7 +189,7 @@ fn data_in_a_column_without_a_header_is_still_refused() {
     let err = run(&rows, "Remark 1").expect_err("a column without a header must be refused");
 
     assert!(
-        err.contains("column C (first value at row 2: \"stray\")"),
+        err.contains("column C, first value at row 2: Cell value: \"stray\""),
         "{err}"
     );
 }

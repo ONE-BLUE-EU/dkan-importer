@@ -164,9 +164,9 @@ fn excel_error_cells_are_uploaded_as_blank_cells_and_listed() {
     ];
     assert_eq!(lines, expected);
     let expected = "Emptied 3 Excel error value(s), uploading them as blank cells:
-  row 3, column B \"Depth\": #N/A
-  row 3, column C \"Count\": #DIV/0!
-  row 3, column D \"Notes\": #VALUE!";
+  row 3, column B \"Depth\": Cell value: #N/A (Excel error)
+  row 3, column C \"Count\": Cell value: #DIV/0! (Excel error)
+  row 3, column D \"Notes\": Cell value: #VALUE! (Excel error)";
     assert_eq!(error_cells.as_deref(), Some(expected));
 }
 
@@ -198,7 +198,7 @@ fn an_excel_error_cell_in_a_column_without_a_header_is_emptied_not_refused() {
 
     assert_eq!(lines, vec!["Sample ID,Depth,Count,Notes,Date", "S1,1,0,,"]);
     let expected = "Emptied 1 Excel error value(s), uploading them as blank cells:
-  row 2, column F: #VALUE!";
+  row 2, column F: Cell value: #VALUE! (Excel error)";
     assert_eq!(error_cells.as_deref(), Some(expected));
 }
 
@@ -211,7 +211,7 @@ fn data_in_a_column_without_a_header_stops_the_import_and_names_the_column() {
     ])
     .unwrap_err();
 
-    let expected = "column F (first value at row 3: \"Super dirty\")";
+    let expected = "column F, first value at row 3: Cell value: \"Super dirty\"";
     assert!(err.contains("without a header"), "{err}");
     assert!(err.contains(expected), "{err}");
 }
@@ -225,11 +225,11 @@ fn every_column_without_a_header_that_has_data_is_reported() {
     .unwrap_err();
 
     assert!(
-        err.contains("column B (first value at row 2: \"left\")"),
+        err.contains("column B, first value at row 2: Cell value: \"left\""),
         "{err}"
     );
     assert!(
-        err.contains("column E (first value at row 2: \"7\")"),
+        err.contains("column E, first value at row 2: Cell value: 7"),
         "{err}"
     );
 }
@@ -277,7 +277,7 @@ fn column_without_a_header_is_reported_by_its_sheet_position_when_the_table_is_n
     .unwrap_err();
 
     assert!(
-        err.contains("column C (first value at row 3: \"Super dirty\")"),
+        err.contains("column C, first value at row 3: Cell value: \"Super dirty\""),
         "{err}"
     );
 }
@@ -301,7 +301,7 @@ fn excel_error_cells_name_the_row_excel_shows_when_the_table_is_not_at_row_1() {
     rows.push(vec![Text("S1"), Error("#N/A"), Empty, Empty, Empty]);
     let (error_cells, _) = run_sheet_with_error_cells(&rows).unwrap();
 
-    let expected = "row 3, column B \"Depth\": #N/A";
+    let expected = "row 3, column B \"Depth\": Cell value: #N/A (Excel error)";
     assert!(
         error_cells
             .as_deref()

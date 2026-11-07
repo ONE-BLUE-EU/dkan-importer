@@ -434,7 +434,7 @@ fn a_sample_column_without_a_header_is_refused() {
     let err = run(&rows, spec()).expect_err("a sample column without a header must be refused");
 
     assert!(
-        err.contains("column G (first value at row 2: \"0.4\")"),
+        err.contains("column G, first value at row 2: Cell value: 0.4"),
         "{err}"
     );
 }
@@ -473,8 +473,8 @@ fn excel_error_cells_are_emptied_so_a_sample_error_gives_no_row() {
     ];
     assert_eq!(unpivoted.csv_lines, expected);
     let expected = "Emptied 2 Excel error value(s), uploading them as blank cells:
-  row 2, column C \"Classification\": #N/A
-  row 2, column H \"ST02\": #DIV/0!";
+  row 2, column C \"Classification\": Cell value: #N/A (Excel error)
+  row 2, column H \"ST02\": Cell value: #DIV/0! (Excel error)";
     assert_eq!(unpivoted.error_cells.as_deref(), Some(expected));
     assert!(
         unpivoted
@@ -794,9 +794,9 @@ fn nd_cells_are_treated_as_ns_and_give_no_row() {
     ];
     assert_eq!(unpivoted.csv_lines, expected);
     let expected = vec![
-        "row 2, column F \"ST01\": no row: \"ND\" is treated as NS (no sample)",
-        "row 2, column G \"ST02\": no row: \"nd\" is treated as NS (no sample)",
-        "row 2, column H \"ST03\": no row: \"NS\" means no sample",
+        "row 2, column F \"ST01\": Cell value: \"ND\"; no row: treated as NS (no sample)",
+        "row 2, column G \"ST02\": Cell value: \" nd \"; no row: treated as NS (no sample)",
+        "row 2, column H \"ST03\": Cell value: \"NS\"; no row: no sample",
     ];
     assert_eq!(unpivoted.changes, expected);
     assert!(
@@ -1064,8 +1064,8 @@ fn a_blank_identification_level_is_filled_with_2_and_listed() {
     ];
     assert_eq!(unpivoted.columns(&LEVEL_COLUMNS), expected);
     let expected = vec![
-        "row 2, column B \"Identification Level\": filled with \"2\": a blank Identification Level is taken as 2",
-        "row 3, column B \"Identification Level\": filled with \"2\": a blank Identification Level is taken as 2",
+        "row 2, column B \"Identification Level\": Cell value: blank; written as \"2\": a blank Identification Level is taken as 2",
+        "row 3, column B \"Identification Level\": Cell value: \"  \"; written as \"2\": a blank Identification Level is taken as 2",
     ];
     assert_eq!(unpivoted.changes, expected);
 }
@@ -1082,9 +1082,9 @@ fn rows_whose_identification_level_is_not_a_number_stop_the_run_listing_each() {
 
     let expected = "The sheet \"Sheet1\" has 3 row(s) whose Identification Level is not a number. \
 A blank one is taken as 2: correct these cells in the source file and try again:
-  row 2: \"2\"
-  row 3: \"2A\"
-  row 5: \"n/a\"";
+  row 2: Cell value: \"2\"
+  row 3: Cell value: \"2A\"
+  row 5: Cell value: \"n/a\"";
     assert!(err.contains(expected), "{err}");
     for row in ["row 4", "row 6", "row 7"] {
         assert!(!err.contains(row), "{err}");
@@ -1160,10 +1160,10 @@ fn every_change_to_a_sample_cell_is_listed_with_its_reason() {
     let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
-        "row 2, column F \"ST01\": written as \"<LOQ\" instead of \"<loq:0.25\": the number after the marker is the row's Limit of quantification",
-        "row 2, column G \"ST02\": no row: \"ns\" means no sample",
-        "row 3, column F \"ST01\": emptied: Excel error #VALUE!, a failed calculation, read as a blank cell",
-        "row 3, column G \"ST02\": written as \"<LOD\" instead of \"<lod\": markers are written uppercase",
+        "row 2, column F \"ST01\": Cell value: \"<loq:0.25\"; written as \"<LOQ\": the number after the marker is the row's Limit of quantification",
+        "row 2, column G \"ST02\": Cell value: \" ns \"; no row: no sample",
+        "row 3, column F \"ST01\": Cell value: #VALUE! (Excel error); emptied: a failed calculation, read as a blank cell",
+        "row 3, column G \"ST02\": Cell value: \"<lod\"; written as \"<LOD\": markers are written uppercase",
     ];
     assert_eq!(unpivoted.changes, expected);
 }
@@ -1331,8 +1331,8 @@ fn items_that_are_not_whole_numbers_give_no_row_and_a_question() {
     ];
     assert_eq!(unpivoted.columns(&RESULTS), expected);
     let expected = vec![
-        "row 2, column G \"ST01\": no row: \"1.5\" is not a whole number of items",
-        "row 2, column H \"ST02\": no row: \"<LOD\" is not a whole number of items",
+        "row 2, column G \"ST01\": Cell value: 1.5; no row: not a whole number of items",
+        "row 2, column H \"ST02\": Cell value: \"<LOD\"; no row: not a whole number of items",
     ];
     assert_eq!(unpivoted.changes, expected);
     let expected = vec![
@@ -1363,7 +1363,7 @@ fn x_in_an_ng_l_row_gives_no_row_and_a_question() {
         "ST02,0.3,detected quantitatively",
     ];
     assert_eq!(unpivoted.columns(&RESULTS), expected);
-    let expected = vec!["row 2, column G \"ST01\": no row: X in an ng/L row"];
+    let expected = vec!["row 2, column G \"ST01\": Cell value: \"X\"; no row: X in an ng/L row"];
     assert_eq!(unpivoted.changes, expected);
     let expected = vec![
         "1 cell(s): X results in ng/L rows are not imported, as X is a Peak Area result. Are the units or the results wrong?",
@@ -1402,12 +1402,12 @@ fn unclear_results_give_no_row_and_a_question() {
     ];
     assert_eq!(unpivoted.columns(&RESULTS), expected);
     let expected = vec![
-        "row 2, column G \"ST01\": no row: the ng/L row has no Limit of detection or no Limit of quantification, so its results cannot be characterised",
-        "row 3, column G \"ST01\": no row: a number in a Peak Area row",
-        "row 4, column G \"ST01\": no row: Concentration units \"ug/kg\" are not imported",
-        "row 5, column G \"ST01\": no row: a number in a row without Concentration units",
-        "row 6, column G \"ST01\": no row: \"<LOD\" in a row with Concentration units \"Peak Area\"",
-        "row 7, column G \"ST01\": no row: Concentration units \"ug/kg\" are not imported",
+        "row 2, column G \"ST01\": Cell value: 0.3; no row: the ng/L row has no Limit of detection or no Limit of quantification, so its results cannot be characterised",
+        "row 3, column G \"ST01\": Cell value: 1234; no row: a number in a Peak Area row",
+        "row 4, column G \"ST01\": Cell value: 0.3; no row: Concentration units \"ug/kg\" are not imported",
+        "row 5, column G \"ST01\": Cell value: 0.3; no row: a number in a row without Concentration units",
+        "row 6, column G \"ST01\": Cell value: \"<LOD\"; no row: \"<LOD\" in a row with Concentration units \"Peak Area\"",
+        "row 7, column G \"ST01\": Cell value: \"<LOQ\"; no row: Concentration units \"ug/kg\" are not imported",
     ];
     assert_eq!(unpivoted.changes, expected);
     let expected = vec![
@@ -1478,15 +1478,15 @@ fn a_characterisation_that_differs_from_the_sheets_is_listed_with_what_the_cell_
     let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
-        "row 2, column G \"ST01\": Detection characterisation \"detected quantitatively\" instead of \"not detected\": the cell holds 0.3, at least the Limit of quantification (0.25)",
-        "row 2, column H \"ST02\": written as \"<LOQ\" instead of \"<loq\": markers are written uppercase",
-        "row 2, column H \"ST02\": Detection characterisation \"detected, not quantified\" instead of \"not detected\": the cell holds \"<loq\"",
-        "row 2, column I \"ST03\": Detection characterisation \"detected, not quantified\" instead of \"not detected\": the cell holds 0.2, between the Limit of detection (0.1) and the Limit of quantification (0.25)",
-        "row 3, column G \"ST01\": Detection characterisation \"not detected\" instead of \"detected quantitatively\": the cell holds 0.05, below the Limit of detection (0.1)",
-        "row 3, column H \"ST02\": Detection characterisation \"not detected\" instead of \"detected quantitatively\": the cell holds \"<LOD\"",
-        "row 4, column G \"ST01\": Detection characterisation \"detected qualitatively\" instead of \"not detected\": the cell holds \"X\", in a Peak Area row",
-        "row 5, column G \"ST01\": Detection characterisation \"detected qualitatively\" instead of \"not detected\": the cell holds \"X\", in a row without Concentration units, taken as Peak Area",
-        "row 6, column G \"ST01\": Detection characterisation \"detected quantitatively\" instead of \"not detected\": the cell holds 3, a count of items",
+        "row 2, column G \"ST01\": Cell value: 0.3; Detection characterisation \"detected quantitatively\" instead of \"not detected\": at least the Limit of quantification (0.25)",
+        "row 2, column H \"ST02\": Cell value: \"<loq\"; written as \"<LOQ\": markers are written uppercase",
+        "row 2, column H \"ST02\": Cell value: \"<loq\"; Detection characterisation \"detected, not quantified\" instead of \"not detected\": below the Limit of quantification",
+        "row 2, column I \"ST03\": Cell value: 0.2; Detection characterisation \"detected, not quantified\" instead of \"not detected\": between the Limit of detection (0.1) and the Limit of quantification (0.25)",
+        "row 3, column G \"ST01\": Cell value: 0.05; Detection characterisation \"not detected\" instead of \"detected quantitatively\": below the Limit of detection (0.1)",
+        "row 3, column H \"ST02\": Cell value: \"<LOD\"; Detection characterisation \"not detected\" instead of \"detected quantitatively\": below the Limit of detection",
+        "row 4, column G \"ST01\": Cell value: \"X\"; Detection characterisation \"detected qualitatively\" instead of \"not detected\": X in a Peak Area row",
+        "row 5, column G \"ST01\": Cell value: \"X\"; Detection characterisation \"detected qualitatively\" instead of \"not detected\": X in a row without Concentration units, taken as Peak Area",
+        "row 6, column G \"ST01\": Cell value: 3; Detection characterisation \"detected quantitatively\" instead of \"not detected\": a count of items",
     ];
     assert_eq!(unpivoted.changes, expected);
 }
@@ -1572,14 +1572,14 @@ fn every_problem_is_reported_in_one_run_with_the_changes_and_questions() {
         .to_string();
 
     let expected = vec![
-        "row 2, column G \"ST01\": no row: X in an ng/L row",
-        "row 4, column G \"ST01\": no row: \"1.5\" is not a whole number of items",
+        "row 2, column G \"ST01\": Cell value: \"X\"; no row: X in an ng/L row",
+        "row 4, column G \"ST01\": Cell value: 1.5; no row: not a whole number of items",
     ];
     assert_eq!(changes, expected);
     // X in ng/L, the 1.5 items, and "detected, not quantified" for row 2's 0.2
     assert_eq!(questions.len(), 3, "{questions:?}");
     let expected = "The sheet \"Sheet1\" has 1 row(s) whose Identification Level is not a number. A blank one is taken as 2: correct these cells in the source file and try again:
-  row 4: \"2A\"";
+  row 4: Cell value: \"2A\"";
     assert!(err.contains(expected), "{err}");
     assert!(
         err.contains("has 1 ng/mL row(s) whose values no ng/L row holds"),
@@ -1748,7 +1748,7 @@ fn an_ng_ml_row_without_an_equivalent_ng_l_row_stops_the_run_naming_the_closest(
 
     let run = run_ng_per_ml(&rows);
 
-    let line = "row 2: skipped: in ng/mL, but no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row 4, differs in 1 cell(s), first at row 4, column F \"Limit of quantification\": 0.25 expected, blank found";
+    let line = "row 2: skipped: in ng/mL, but no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row 4, differs in 1 cell(s), first at row 4, column F \"Limit of quantification\": Cell value: blank; expected 0.25";
     assert_eq!(run.ng_per_ml_rows, vec![line]);
     let error = run.error.expect("the missing ng/L row must stop the run");
     let expected = format!(
@@ -1812,6 +1812,6 @@ fn the_identification_level_of_an_ng_ml_row_is_not_checked() {
         error.contains("has 1 row(s) whose Identification Level is not a number"),
         "{error}"
     );
-    assert!(error.contains("\n  row 3: \"1\""), "{error}");
+    assert!(error.contains("\n  row 3: Cell value: \"1\""), "{error}");
     assert!(!error.contains("\n  row 2: "), "{error}");
 }

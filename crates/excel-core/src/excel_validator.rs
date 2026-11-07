@@ -45,33 +45,81 @@ impl std::fmt::Display for SheetCell {
     }
 }
 
-/// What the importer did to a cell instead of taking it as written, and why. Listed in the run
-/// log, so the data can be checked and corrected at its source.
+/// A cell's value as the sheet holds it, for the run log, so it cannot be misread: text in
+/// quotes, as written, so that text reading a number cannot be taken for the number
 #[derive(Debug, Clone, PartialEq)]
-pub enum Change {
+pub enum CellValue {
+    Blank,
+    Text(String),
+    Number(f64),
+    Bool(bool),
+    /// A date or time, as Excel's value reads
+    DateTime(String),
+    /// An Excel error value, such as `#VALUE!`
+    Error(String),
+}
+
+impl From<&Data> for CellValue {
+    fn from(cell: &Data) -> Self {
+        match cell {
+            Data::Empty => CellValue::Blank,
+            Data::String(text) => CellValue::Text(text.clone()),
+            Data::Float(n) => CellValue::Number(*n),
+            Data::Int(n) => CellValue::Number(*n as f64),
+            Data::Bool(b) => CellValue::Bool(*b),
+            Data::DateTime(dt) => {
+                CellValue::DateTime(ExcelValidator::excel_datetime_to_chrono(dt).to_string())
+            }
+            Data::DateTimeIso(text) | Data::DurationIso(text) => CellValue::DateTime(text.clone()),
+            Data::Error(e) => CellValue::Error(e.to_string()),
+        }
+    }
+}
+
+impl CellValue {
+    /// The value of the cell at `cell`, blank where the row has no cell
+    fn of(cell: Option<&Data>) -> Self {
+        cell.map_or(CellValue::Blank, CellValue::from)
+    }
+}
+
+impl std::fmt::Display for CellValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CellValue::Blank => f.write_str("blank"),
+            CellValue::Text(text) => write!(f, "\"{text}\""),
+            CellValue::Number(n) => write!(f, "{n}"),
+            CellValue::Bool(true) => f.write_str("TRUE"),
+            CellValue::Bool(false) => f.write_str("FALSE"),
+            CellValue::DateTime(text) => f.write_str(text),
+            CellValue::Error(e) => write!(f, "{e} (Excel error)"),
+        }
+    }
+}
+
+/// What the importer did to a cell instead of taking it as written, and why. Listed in the run
+/// log, with the cell's value, so the data can be checked and corrected at its source.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Change {
+    pub cell: SheetCell,
+    /// The cell's value in the sheet
+    pub value: CellValue,
+    pub kind: ChangeKind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChangeKind {
     /// An Excel error value, read as a blank cell
-    Emptied { cell: SheetCell, error: String },
+    Emptied,
     /// A sample cell that gives no row
-    Skipped { cell: SheetCell, reason: SkipReason },
-    /// A value written differently from the source
-    Rewritten {
-        cell: SheetCell,
-        was: String,
-        now: String,
-        reason: String,
-    },
-    /// A blank cell given `value`, and why
-    Filled {
-        cell: SheetCell,
-        value: String,
-        reason: String,
-    },
-    /// A field of the result of the sample cell `cell` worked out by the importer, differing from
-    /// the row's own value `was`
+    Skipped(SkipReason),
+    /// A value written as `now` instead of the cell's
+    Rewritten { now: String, reason: String },
+    /// A field of the sample cell's result worked out by the importer as `derived`, differing
+    /// from the row's own value `was`
     Derived {
-        cell: SheetCell,
         field: String,
-        value: String,
+        derived: String,
         was: String,
         reason: String,
     },
@@ -81,60 +129,34 @@ pub enum Change {
 /// summary, not listed.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SkipReason {
-    /// No sample was taken; the cell's text as written, trimmed
-    NoSample(String),
+    /// No sample was taken: the cell is [`NO_SAMPLE`], or [`NO_SAMPLE_ALIAS`] treated as it
+    NoSample,
     /// Not clear yet how to import it: the question to ask, and why this cell gives no row
     Open { question: Question, reason: String },
 }
 
 impl std::fmt::Display for Change {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Change::Emptied { cell, error } => write!(
-                f,
-                "{cell}: emptied: Excel error {error}, a failed calculation, read as a blank cell"
-            ),
-            Change::Skipped {
-                cell,
-                reason: SkipReason::NoSample(text),
-            } if text.eq_ignore_ascii_case(NO_SAMPLE) => {
-                write!(f, "{cell}: no row: \"{text}\" means no sample")
+        let Change { cell, value, kind } = self;
+        write!(f, "{cell}: Cell value: {value}; ")?;
+        match kind {
+            ChangeKind::Emptied => {
+                f.write_str("emptied: a failed calculation, read as a blank cell")
             }
-            Change::Skipped {
-                cell,
-                reason: SkipReason::NoSample(text),
-            } => write!(
-                f,
-                "{cell}: no row: \"{text}\" is treated as {NO_SAMPLE} (no sample)"
-            ),
-            Change::Rewritten {
-                cell,
-                was,
-                now,
-                reason,
-            } => write!(
-                f,
-                "{cell}: written as \"{now}\" instead of \"{was}\": {reason}"
-            ),
-            Change::Skipped {
-                cell,
-                reason: SkipReason::Open { reason, .. },
-            } => write!(f, "{cell}: no row: {reason}"),
-            Change::Filled {
-                cell,
-                value,
-                reason,
-            } => write!(f, "{cell}: filled with \"{value}\": {reason}"),
-            Change::Derived {
-                cell,
+            ChangeKind::Skipped(SkipReason::NoSample) => match value {
+                CellValue::Text(text) if text.trim().eq_ignore_ascii_case(NO_SAMPLE) => {
+                    f.write_str("no row: no sample")
+                }
+                _ => write!(f, "no row: treated as {NO_SAMPLE} (no sample)"),
+            },
+            ChangeKind::Skipped(SkipReason::Open { reason, .. }) => write!(f, "no row: {reason}"),
+            ChangeKind::Rewritten { now, reason } => write!(f, "written as \"{now}\": {reason}"),
+            ChangeKind::Derived {
                 field,
-                value,
+                derived,
                 was,
                 reason,
-            } => write!(
-                f,
-                "{cell}: {field} \"{value}\" instead of \"{was}\": {reason}"
-            ),
+            } => write!(f, "{field} \"{derived}\" instead of \"{was}\": {reason}"),
         }
     }
 }
@@ -290,8 +312,8 @@ pub struct Difference {
     pub cell: SheetCell,
     /// The ng/mL value, as it should be in ng/L: a number, or text in quotes
     pub expected: String,
-    /// The cell: a number, text in quotes, or `blank`
-    pub found: String,
+    /// The ng/L cell's value
+    pub found: CellValue,
 }
 
 impl std::fmt::Display for NgPerMlRow {
@@ -313,8 +335,8 @@ impl std::fmt::Display for NgPerMlRow {
             }
             Counterpart::Missing(Some(Closest { first, differences })) => write!(
                 f,
-                ", but no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row {}, differs in {differences} cell(s), first at {}: {} expected, {} found",
-                first.cell.row, first.cell, first.expected, first.found
+                ", but no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row {}, differs in {differences} cell(s), first at {}: Cell value: {}; expected {}",
+                first.cell.row, first.cell, first.found, first.expected
             ),
         }
     }
@@ -341,24 +363,13 @@ fn cell_number(cell: &Data) -> Option<f64> {
     .filter(|n| n.is_finite())
 }
 
-/// `cell` as the run log shows it: a number, text in quotes, or `blank`
-fn describe(cell: Option<&Data>) -> String {
-    match cell.filter(|cell| !is_blank(cell)) {
-        None => "blank".to_string(),
-        Some(cell) => match cell_number(cell) {
-            Some(n) => n.to_string(),
-            None => format!("\"{}\"", cell.to_string().trim()),
-        },
-    }
-}
-
 /// What the ng/L cell should hold and what it holds, unless it holds the ng/mL cell's value
 /// multiplied by `factor`
 fn difference(
     ng_per_ml: Option<&Data>,
     ng_per_l: Option<&Data>,
     factor: f64,
-) -> Option<(String, String)> {
+) -> Option<(String, CellValue)> {
     let ng_per_ml = ng_per_ml.filter(|cell| !is_blank(cell) && !matches!(cell, Data::Error(_)))?;
     let (expected, holds) = match cell_number(ng_per_ml) {
         Some(n) => {
@@ -377,7 +388,7 @@ fn difference(
             (format!("\"{text}\""), holds)
         }
     };
-    (!holds).then(|| (expected, describe(ng_per_l)))
+    (!holds).then(|| (expected, CellValue::of(ng_per_l)))
 }
 
 /// The ng/L row of `ng_per_litre` (row number, cells) holding the values of the ng/mL row
@@ -482,12 +493,10 @@ impl Outcome {
     }
 }
 
-/// The detection characterisation of `result`, in a row with `units` and limits `lod`, `loq`;
-/// `raw` is the cell as written, for messages
+/// The detection characterisation of `result`, in a row with `units` and limits `lod`, `loq`
 fn characterise(
     units: &Units,
     result: &SampleResult,
-    raw: &str,
     lod: Option<f64>,
     loq: Option<f64>,
 ) -> Outcome {
@@ -505,11 +514,6 @@ fn characterise(
             units,
         })
     };
-    // What the cell holds, as written: a number, or text in quotes
-    let holds = match result {
-        SampleResult::Number(_) => format!("the cell holds {raw}"),
-        SampleResult::Marker(_) => format!("the cell holds \"{raw}\""),
-    };
     match units {
         Units::NanogramsPerLitre => {
             if matches!(result, SampleResult::Marker(X_MARKER)) {
@@ -521,45 +525,46 @@ fn characterise(
             match result {
                 SampleResult::Number(n) if *n >= loq => characterised(
                     DETECTED_QUANTITATIVELY,
-                    format!("{holds}, at least the {LOQ_FIELD} ({loq})"),
+                    format!("at least the {LOQ_FIELD} ({loq})"),
                 ),
                 SampleResult::Number(n) if *n >= lod => characterised(
                     DETECTED_NOT_QUANTIFIED,
-                    format!("{holds}, between the {LOD_FIELD} ({lod}) and the {LOQ_FIELD} ({loq})"),
+                    format!("between the {LOD_FIELD} ({lod}) and the {LOQ_FIELD} ({loq})"),
                 ),
-                SampleResult::Number(_) => characterised(
-                    NOT_DETECTED,
-                    format!("{holds}, below the {LOD_FIELD} ({lod})"),
-                ),
-                SampleResult::Marker(LOD_MARKER) => characterised(NOT_DETECTED, holds),
-                SampleResult::Marker(LOQ_MARKER) => characterised(DETECTED_NOT_QUANTIFIED, holds),
+                SampleResult::Number(_) => {
+                    characterised(NOT_DETECTED, format!("below the {LOD_FIELD} ({lod})"))
+                }
+                SampleResult::Marker(LOD_MARKER) => {
+                    characterised(NOT_DETECTED, format!("below the {LOD_FIELD}"))
+                }
+                SampleResult::Marker(LOQ_MARKER) => {
+                    characterised(DETECTED_NOT_QUANTIFIED, format!("below the {LOQ_FIELD}"))
+                }
                 SampleResult::Marker(_) => unclassified(Some("ng/L".to_string())),
             }
         }
         Units::PeakArea => match result {
-            SampleResult::Marker(X_MARKER) => characterised(
-                DETECTED_QUALITATIVELY,
-                format!("{holds}, in a Peak Area row"),
-            ),
+            SampleResult::Marker(X_MARKER) => {
+                characterised(DETECTED_QUALITATIVELY, "X in a Peak Area row".to_string())
+            }
             SampleResult::Number(_) => Outcome::open(Question::NumberInPeakArea),
             SampleResult::Marker(_) => unclassified(Some("Peak Area".to_string())),
         },
         Units::Missing => match result {
             SampleResult::Marker(X_MARKER) => Outcome::Characterised {
                 detection: DETECTED_QUALITATIVELY,
-                reason: format!("{holds}, in a row without {UNITS_FIELD}, taken as Peak Area"),
+                reason: Question::EmptyUnitsTakenAsPeakArea.reason(),
                 question: Some(Question::EmptyUnitsTakenAsPeakArea),
             },
             _ => unclassified(None),
         },
         Units::Items => match result {
-            SampleResult::Number(n) if *n >= 0.0 && n.fract() == 0.0 => characterised(
-                DETECTED_QUANTITATIVELY,
-                format!("{holds}, a count of items"),
-            ),
+            SampleResult::Number(n) if *n >= 0.0 && n.fract() == 0.0 => {
+                characterised(DETECTED_QUANTITATIVELY, "a count of items".to_string())
+            }
             _ => Outcome::Open {
                 question: Question::ItemsNotWholeNumber,
-                reason: format!("\"{raw}\" is not a whole number of items"),
+                reason: "not a whole number of items".to_string(),
             },
         },
         Units::Other(units) => Outcome::open(Question::OtherUnits(units.clone())),
@@ -1631,10 +1636,11 @@ impl ExcelValidator {
                     row.iter()
                         .enumerate()
                         .map(|(col_idx, cell)| match cell {
-                            Data::Error(e) => {
-                                changes.push(Change::Emptied {
+                            Data::Error(_) => {
+                                changes.push(Change {
                                     cell: sheet_cell(col_idx),
-                                    error: e.to_string(),
+                                    value: CellValue::from(cell),
+                                    kind: ChangeKind::Emptied,
                                 });
                                 Data::Empty
                             }
@@ -1654,10 +1660,10 @@ impl ExcelValidator {
             {
                 unnamed_columns_with_data.entry(col_idx).or_insert_with(|| {
                     format!(
-                        "column {} (first value at row {}: {:?})",
+                        "column {}, first value at row {}: Cell value: {}",
                         column_name(sheet_column(first_col, col_idx)),
                         row_number,
-                        cell.to_string()
+                        CellValue::from(cell)
                     )
                 });
             }
@@ -1712,7 +1718,8 @@ impl ExcelValidator {
                 .columns
                 .iter()
                 .any(|(col_idx, _)| row.get(*col_idx).is_some_and(|cell| !is_no_result(cell)));
-            match row.get(samples.identification_level) {
+            let level_cell = row.get(samples.identification_level);
+            match level_cell {
                 _ if !has_results => {}
                 Some(Data::Int(_) | Data::Float(_)) => {}
                 cell if cell.is_none_or(is_blank) => {
@@ -1724,23 +1731,20 @@ impl ExcelValidator {
                         );
                         json_obj.insert(header.clone(), value);
                     }
-                    changes.push(Change::Filled {
+                    changes.push(Change {
                         cell: level,
-                        value: IDENTIFICATION_LEVEL.to_string(),
-                        reason: format!(
-                            "a blank {IDENTIFICATION_LEVEL_FIELD} is taken as {IDENTIFICATION_LEVEL}"
-                        ),
+                        value: CellValue::of(level_cell),
+                        kind: ChangeKind::Rewritten {
+                            now: IDENTIFICATION_LEVEL.to_string(),
+                            reason: format!(
+                                "a blank {IDENTIFICATION_LEVEL_FIELD} is taken as {IDENTIFICATION_LEVEL}"
+                            ),
+                        },
                     });
                 }
-                // Text in quotes, as text reading a number looks like the number in Excel
                 cell => wrong_identification_levels.push(format!(
-                    "row {}: {}",
-                    row_number,
-                    match cell.filter(|cell| !is_blank(cell)) {
-                        None => "blank".to_string(),
-                        Some(Data::String(text)) => format!("\"{}\"", text.trim()),
-                        Some(cell) => cell.to_string(),
-                    }
+                    "row {row_number}: Cell value: {}",
+                    CellValue::of(cell)
                 )),
             }
             let units = Units::parse(row.get(samples.units));
@@ -1760,9 +1764,10 @@ impl ExcelValidator {
                 };
                 if is_no_result(cell) {
                     no_sample_cells = no_sample_cells.saturating_add(1);
-                    changes.push(Change::Skipped {
+                    changes.push(Change {
                         cell: sheet_cell(*col_idx),
-                        reason: SkipReason::NoSample(cell.to_string().trim().to_string()),
+                        value: CellValue::from(cell),
+                        kind: ChangeKind::Skipped(SkipReason::NoSample),
                     });
                     continue;
                 }
@@ -1799,11 +1804,13 @@ impl ExcelValidator {
                             }
                             None => "markers are written uppercase".to_string(),
                         };
-                        changes.push(Change::Rewritten {
+                        changes.push(Change {
                             cell: sheet_cell(*col_idx),
-                            was,
-                            now: marker.to_string(),
-                            reason,
+                            value: CellValue::from(cell),
+                            kind: ChangeKind::Rewritten {
+                                now: marker.to_string(),
+                                reason,
+                            },
                         });
                     }
                     value = Value::String(marker.to_string());
@@ -1817,8 +1824,7 @@ impl ExcelValidator {
                     None => number_of(&value).map(SampleResult::Number),
                 };
                 if let Some(result) = result {
-                    let raw = cell.to_string();
-                    match characterise(&units, &result, raw.trim(), lod, loq) {
+                    match characterise(&units, &result, lod, loq) {
                         Outcome::Characterised {
                             detection,
                             reason,
@@ -1831,12 +1837,15 @@ impl ExcelValidator {
                             if let Some(was) =
                                 sheet_detection.as_deref().filter(|was| *was != detection)
                             {
-                                changes.push(Change::Derived {
+                                changes.push(Change {
                                     cell: sheet_cell(*col_idx),
-                                    field: DETECTION_FIELD.to_string(),
-                                    value: detection.to_string(),
-                                    was: was.to_string(),
-                                    reason,
+                                    value: CellValue::from(cell),
+                                    kind: ChangeKind::Derived {
+                                        field: DETECTION_FIELD.to_string(),
+                                        derived: detection.to_string(),
+                                        was: was.to_string(),
+                                        reason,
+                                    },
                                 });
                             }
                             sample_obj.insert(
@@ -1847,9 +1856,10 @@ impl ExcelValidator {
                         Outcome::Open { question, reason } => {
                             let count = questions.entry(question.clone()).or_insert(0);
                             *count = count.saturating_add(1);
-                            changes.push(Change::Skipped {
+                            changes.push(Change {
                                 cell: sheet_cell(*col_idx),
-                                reason: SkipReason::Open { question, reason },
+                                value: CellValue::from(cell),
+                                kind: ChangeKind::Skipped(SkipReason::Open { question, reason }),
                             });
                             continue;
                         }
@@ -1997,7 +2007,11 @@ impl ExcelValidator {
         let error_cells: Vec<String> = changes
             .iter()
             .filter_map(|change| match change {
-                Change::Emptied { cell, error } => Some(format!("{cell}: {error}")),
+                Change {
+                    cell,
+                    value,
+                    kind: ChangeKind::Emptied,
+                } => Some(format!("{cell}: Cell value: {value}")),
                 _ => None,
             })
             .collect();
@@ -3605,6 +3619,41 @@ mod tests {
     use crate::test_utils::*; // Import test utilities from src/test_utils.rs
     use calamine::Data;
     use serde_json::{Value, json};
+
+    /// Every kind of cell reads unmistakably: text in quotes as written, so that text reading a
+    /// number cannot be taken for the number
+    #[test]
+    fn a_cell_value_shows_what_the_cell_holds() {
+        let cases = [
+            (Data::Empty, "blank"),
+            (Data::String(String::new()), "\"\""),
+            (Data::String("  ".to_string()), "\"  \""),
+            (Data::String("<LOQ".to_string()), "\"<LOQ\""),
+            (Data::String(" nd ".to_string()), "\" nd \""),
+            (Data::String("0.3".to_string()), "\"0.3\""),
+            (Data::Float(0.3), "0.3"),
+            (Data::Float(2.0), "2"),
+            (Data::Int(7), "7"),
+            (Data::Bool(true), "TRUE"),
+            (Data::Bool(false), "FALSE"),
+            (
+                Data::DateTimeIso("2024-01-02T10:00:00".to_string()),
+                "2024-01-02T10:00:00",
+            ),
+            (
+                Data::Error(calamine::CellErrorType::Value),
+                "#VALUE! (Excel error)",
+            ),
+            (
+                Data::Error(calamine::CellErrorType::NA),
+                "#N/A (Excel error)",
+            ),
+        ];
+        for (cell, expected) in cases {
+            assert_eq!(CellValue::from(&cell).to_string(), expected, "{cell:?}");
+        }
+        assert_eq!(CellValue::of(None).to_string(), "blank");
+    }
 
     #[test]
     fn column_name_is_the_excel_letter_up_to_the_last_column() {

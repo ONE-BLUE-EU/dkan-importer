@@ -105,7 +105,9 @@ impl<L: Write, O: Write, E: Write> RunLog<L, O, E> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use excel_core::{Closest, Counterpart, Difference, SheetCell, SkipReason};
+    use excel_core::{
+        CellValue, ChangeKind, Closest, Counterpart, Difference, SheetCell, SkipReason,
+    };
     use std::num::NonZeroUsize;
 
     fn cell() -> SheetCell {
@@ -119,23 +121,25 @@ mod tests {
     #[test]
     fn changes_are_counted_and_listed_one_per_line() {
         let changes = [
-            Change::Skipped {
+            Change {
                 cell: cell(),
-                reason: SkipReason::NoSample("NS".to_string()),
+                value: CellValue::Text("NS".to_string()),
+                kind: ChangeKind::Skipped(SkipReason::NoSample),
             },
-            Change::Skipped {
+            Change {
                 cell: cell(),
-                reason: SkipReason::Open {
+                value: CellValue::Number(1234.0),
+                kind: ChangeKind::Skipped(SkipReason::Open {
                     question: Question::NumberInPeakArea,
                     reason: "a number in a Peak Area row".to_string(),
-                },
+                }),
             },
         ];
 
         let expected = vec![
             "2 cell change(s), each with its reason:",
-            "  row 4, column L \"ST03\": no row: \"NS\" means no sample",
-            "  row 4, column L \"ST03\": no row: a number in a Peak Area row",
+            "  row 4, column L \"ST03\": Cell value: \"NS\"; no row: no sample",
+            "  row 4, column L \"ST03\": Cell value: 1234; no row: a number in a Peak Area row",
         ];
         assert_eq!(changes_lines(&changes), expected);
     }
@@ -178,7 +182,7 @@ mod tests {
                     first: Difference {
                         cell: cell(),
                         expected: "0.25".to_string(),
-                        found: "blank".to_string(),
+                        found: CellValue::Blank,
                     },
                     differences: NonZeroUsize::MIN,
                 })),
@@ -193,7 +197,7 @@ mod tests {
         let expected = vec![
             "3 ng/mL row(s) skipped, as only ng/L is imported, each with the ng/L row holding its values:",
             "  row 2: skipped: in ng/mL; its values are in the ng/L row 23, which is imported",
-            "  row 3: skipped: in ng/mL, but no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row 4, differs in 1 cell(s), first at row 4, column L \"ST03\": 0.25 expected, blank found",
+            "  row 3: skipped: in ng/mL, but no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row 4, differs in 1 cell(s), first at row 4, column L \"ST03\": Cell value: blank; expected 0.25",
             "  row 5: skipped: in ng/mL, but the sheet has no ng/L row to hold its values",
         ];
         assert_eq!(ng_per_ml_rows_lines(&rows), expected);

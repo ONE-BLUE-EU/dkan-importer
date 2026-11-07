@@ -84,12 +84,12 @@ Okadaic acid   | ST02_Surface | 0.40
 
 - The leading columns whose headers are data dictionary fields are copied to every row. Every column after them is a sample column.
 - A blank sample cell is no result, so it gives no row. Cells with only spaces, and formulas that give `""`, count as blank.
-- The sheet must have an "Identification Level" column before the sample columns, and the data dictionary that field; otherwise the run stops before reading any rows. In every row with results, the cell must hold a number, uploaded as written, or be blank, uploaded as `2` and listed in the run log: `row 3, column B "Identification Level": filled with "2": a blank Identification Level is taken as 2`. The importer does not rewrite anything else, text included, even text reading a number, which Excel shows the same: it stops the run before anything is written or uploaded, listing each row to correct in the source file, with text in quotes:
+- The sheet must have an "Identification Level" column before the sample columns, and the data dictionary that field; otherwise the run stops before reading any rows. In every row with results, the cell must hold a number, uploaded as written, or be blank, uploaded as `2` and listed in the run log: `row 3, column B "Identification Level": Cell value: blank; written as "2": a blank Identification Level is taken as 2`. The importer does not rewrite anything else, text included, even text reading a number, which Excel shows the same: it stops the run before anything is written or uploaded, listing each row to correct in the source file with its cell value:
 
   ```
   The sheet "Analytical results" has 2 row(s) whose Identification Level is not a number. A blank one is taken as 2: correct these cells in the source file and try again:
-    row 4: "2A"
-    row 5: "2"
+    row 4: Cell value: "2A"
+    row 5: Cell value: "2"
   ```
 - `--headers-column` and `--values-column` are only accepted with `--unpivot`, and `--unpivot` needs `--headers-column`. Both must be data dictionary fields that are not columns in the sheet. Otherwise the run stops and lists the fields that can be used.
 - The run also stops, before anything is written or uploaded, if the sheet does not start with data dictionary fields, has no sample columns, or has a data dictionary field among the sample columns.
@@ -142,13 +142,13 @@ Each result's "Detection characterisation" is worked out from its row's "Concent
 | none | `X` | detected qualitatively (taken as Peak Area; the units stay empty) |
 | items | a whole number, 0 or more | detected quantitatively |
 
-- Where the result's characterisation differs from the sheet's own, the run log says so, with the reason, starting with what the cell holds as written (a number, or text in quotes): `row 2, column AQ "24019033": Detection characterisation "detected, not quantified" instead of "detected quantitatively": the cell holds "<LOQ"`, or `...: the cell holds 0.05, below the Limit of detection (0.1)`.
+- Where the result's characterisation differs from the sheet's own, the run log says so, with the cell value and the reason: `row 2, column AQ "24019033": Cell value: "<LOQ"; Detection characterisation "detected, not quantified" instead of "detected quantitatively": below the Limit of quantification`, or `...: Cell value: 0.05; Detection characterisation "not detected" instead of "detected quantitatively": below the Limit of detection (0.1)`.
 - Rows in ng/mL (matched ignoring case and spaces) are skipped: only ng/L is imported. Sheets keep them beside the ng/L rows calculated from them by formulas, which the importer reads as the values Excel saved, so the source file needs no change. Each ng/mL row's values must be in an ng/L row of the sheet: the same text (ignoring case and spaces), and its numbers x1000 in the limits and the sample columns, to 6 significant digits. Where the ng/mL row is blank or holds an Excel error, the ng/L row may hold anything (such as a Classification). The summary counts the skipped rows, and the run log lists each, with its ng/L row:
 
   ```
   2 ng/mL row(s) skipped, as only ng/L is imported, each with the ng/L row holding its values:
     row 2: skipped: in ng/mL; its values are in the ng/L row 23, which is imported
-    row 18: skipped: in ng/mL, but no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row 39, differs in 1 cell(s), first at row 39, column J "Limit of quantification": 0.6746666666666667 expected, blank found
+    row 18: skipped: in ng/mL, but no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row 39, differs in 1 cell(s), first at row 39, column J "Limit of quantification": Cell value: blank; expected 0.6746666666666667
   ```
 
   An ng/mL row whose values no ng/L row holds stops the run, naming the ng/L row differing from it in the fewest cells, as a formula there may point at the wrong row. An ng/mL row's identification level is not checked, as it is not imported.
@@ -263,14 +263,16 @@ Every run writes a log in the current directory, named exactly like the run's CS
 
   When a name is not read, the reason takes its place: `(not read: the run stopped before reaching DKAN)` for a run stopped by its URL, its file or the login, or DKAN's error. A dataset whose name cannot be read does not stop the run; a data dictionary that cannot be read does, once the top of the log is written.
 - Every line the run printed, including the error that stopped it
-- Every change made to a cell instead of taking it as written, one line per cell with its reason, so the data can be checked and corrected at its source:
+- Every change made to a cell instead of taking it as written, one line per cell with its value and its reason, so the data can be checked and corrected at its source:
 
 ```
 3 cell change(s), each with its reason:
-  row 2, column E "ST01": written as "<LOQ" instead of "<loq:0.25": the number after the marker is the row's Limit of quantification
-  row 2, column F "ST02": no row: "ns" means no sample
-  row 3, column E "ST01": emptied: Excel error #VALUE!, a failed calculation, read as a blank cell
+  row 2, column E "ST01": Cell value: "<loq:0.25"; written as "<LOQ": the number after the marker is the row's Limit of quantification
+  row 2, column F "ST02": Cell value: "ns"; no row: no sample
+  row 3, column E "ST01": Cell value: #VALUE! (Excel error); emptied: a failed calculation, read as a blank cell
 ```
+
+Every line naming a cell gives its value the same way: text in quotes, exactly as written, spaces included, so that text reading a number (`"0.3"`) cannot be taken for the number (`0.3`); `blank` for an empty cell; and an Excel error as `#VALUE! (Excel error)`.
 
 Blank sample cells are not listed, as a sheet has thousands: the summary line counts them.
 
