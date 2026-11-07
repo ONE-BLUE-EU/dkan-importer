@@ -227,13 +227,18 @@ Example Excel structure:
 
 ## Workflow
 
-1. **Authentication**: Connects to DKAN with provided credentials
-2. **Schema Retrieval**: Fetches the specified data dictionary from DKAN
-3. **Schema Conversion**: Converts DKAN data dictionary to JSON Schema
-4. **Validation**: Validates each Excel row against the schema
-5. **CSV Export**: Exports valid data to a timestamped CSV file, in memory
-6. **Upload**: Uploads the CSV file to DKAN's custom importer endpoint
-7. **Distribution**: Adds the uploaded CSV as a distribution to the specified dataset
+1. **URL and file**: Refuses a base URL that is not https, then reads the Excel file, before asking for the password
+2. **Authentication**: Checks that DKAN accepts the login for uploads
+3. **Schema Retrieval**: Fetches the specified data dictionary from DKAN
+4. **Schema Conversion**: Converts DKAN data dictionary to JSON Schema
+5. **Validation**: Validates each Excel row against the schema; refused rows stop the run before anything is uploaded
+6. **CSV Export**: Exports valid data to a timestamped CSV file, in memory
+7. **Upload**: Uploads the CSV file to DKAN's custom importer endpoint
+8. **Distribution**: Adds the uploaded CSV as a distribution to the specified dataset, replacing the one its data dictionary describes, whose file is then deleted
+
+## Code layout and tests
+
+`main.rs` is the shell: it parses the arguments, names the run's files, and gives the import its environment (the file system, the password prompt, DKAN over HTTP, the error log file). The import itself, `import::run`, reaches all of these through the `Environment` and `Dkan` traits, so `tests/import_test.rs` runs whole imports against fakes, with no network, files or terminal. `HttpDkan` builds each request and reads each answer with pure functions, tested in `src/dkan/tests.rs`; only its `send` does I/O. `tests/cli_test.rs` runs the real binary against a closed local port.
 
 ## Output
 

@@ -135,53 +135,5 @@ pub fn create_test_title_to_name_mapping() -> HashMap<String, String> {
 // Excel file helpers - for tests that go through the real file pipeline
 // =============================================================================
 
-/// A cell to write into a test workbook
-#[allow(dead_code)]
-pub enum Cell {
-    Text(&'static str),
-    Number(f64),
-    Empty,
-    /// An Excel error value such as "#N/A", stored as the cached result of a formula
-    Error(&'static str),
-    /// A formula whose cached result is this text, as `IF(A1="","",A1*1000)` gives `""`
-    FormulaText(&'static str),
-}
-
-/// The bytes of a new .xlsx workbook with `rows` (the first row being the headers) in a sheet named
-/// "Sheet1". Nothing is written to disk.
-#[allow(dead_code)]
-pub fn test_workbook(rows: &[Vec<Cell>]) -> Vec<u8> {
-    use rust_xlsxwriter::{Formula, Workbook};
-
-    let mut workbook = Workbook::new();
-    let worksheet = workbook.add_worksheet();
-    worksheet.set_name("Sheet1").unwrap();
-    // A formula with an empty result is stored as `t="str"` and `<v></v>`, as Excel does, not as
-    // the writer's default result of 0
-    worksheet.set_formula_result_default("");
-    for (row_idx, row) in rows.iter().enumerate() {
-        for (col_idx, cell) in row.iter().enumerate() {
-            let (r, c) = (row_idx as u32, col_idx as u16);
-            match cell {
-                Cell::Text(s) => {
-                    worksheet.write_string(r, c, *s).unwrap();
-                }
-                Cell::Number(n) => {
-                    worksheet.write_number(r, c, *n).unwrap();
-                }
-                Cell::Empty => {}
-                Cell::Error(e) => {
-                    worksheet
-                        .write_formula(r, c, Formula::new("=NA()").set_result(*e))
-                        .unwrap();
-                }
-                Cell::FormulaText(text) => {
-                    worksheet
-                        .write_formula(r, c, Formula::new("=\"\"").set_result(*text))
-                        .unwrap();
-                }
-            }
-        }
-    }
-    workbook.save_to_buffer().unwrap()
-}
+#[allow(unused_imports)] // Not every test file builds workbooks
+pub use excel_core::test_utils::{Cell, test_workbook};

@@ -52,22 +52,36 @@ pub fn ng_per_ml_rows_lines(rows: &[NgPerMlRow]) -> Vec<String> {
     lines
 }
 
-/// Writes each line both to the terminal and to the run log file. Never give it a credential.
-pub struct RunLog {
-    file: File,
+/// Writes each line both to the terminal and to the run log. Never give it a credential.
+///
+/// `L` is the log, `O` and `E` the standard output and error: files and the terminal for a run,
+/// buffers for a test.
+pub struct RunLog<L: Write, O: Write, E: Write> {
+    log: L,
+    out: O,
+    err: E,
 }
 
-impl RunLog {
-    /// Create the file at `path`
+impl RunLog<File, io::Stdout, io::Stderr> {
+    /// Create the log file at `path`, printing to the terminal
     pub fn create(path: &str) -> io::Result<Self> {
-        Ok(RunLog {
-            file: File::create(path)?,
-        })
+        Ok(RunLog::new(File::create(path)?, io::stdout(), io::stderr()))
+    }
+}
+
+impl<L: Write, O: Write, E: Write> RunLog<L, O, E> {
+    pub fn new(log: L, out: O, err: E) -> Self {
+        RunLog { log, out, err }
+    }
+
+    /// The log, the standard output and the standard error, as written
+    pub fn into_parts(self) -> (L, O, E) {
+        (self.log, self.out, self.err)
     }
 
     /// A line for the log only, such as what the run was given
     pub fn note(&mut self, line: &str) -> io::Result<()> {
-        writeln!(self.file, "{line}")
+        writeln!(self.log, "{line}")
     }
 
     /// Lines for the log only
@@ -77,13 +91,13 @@ impl RunLog {
 
     /// A line printed to the standard output and logged
     pub fn info(&mut self, line: &str) -> io::Result<()> {
-        println!("{line}");
+        writeln!(self.out, "{line}")?;
         self.note(line)
     }
 
     /// A line printed to the standard error and logged
     pub fn error(&mut self, line: &str) -> io::Result<()> {
-        eprintln!("{line}");
+        writeln!(self.err, "{line}")?;
         self.note(line)
     }
 }

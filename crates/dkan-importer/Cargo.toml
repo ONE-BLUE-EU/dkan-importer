@@ -10,3 +10,7 @@ rpassword.workspace = true
 
 # Common lib
 excel-core.workspace = true
+
+[dev-dependencies]
+# The in-memory test workbooks of excel_core::test_utils
+excel-core = { workspace = true, features = ["test"] }

@@ -96,6 +96,30 @@ pub struct NewDistribution<'a> {
     pub data_dictionary_url: &'a str,
 }
 
+/// The DKAN calls of an import, logged in as one user. [`HttpDkan`] makes them over HTTP; tests
+/// give the import a fake.
+pub trait Dkan {
+    /// Check that DKAN accepts the login for uploads, without uploading anything
+    fn check_login(&self) -> Result<()>;
+
+    /// The data dictionary `id`, once its own URL, which the distribution will name, answers
+    fn data_dictionary(&self, id: &str) -> Result<DataDictionary>;
+
+    /// Upload `csv` as the file `file_name`; returns the uploaded file's URL
+    fn upload_csv(&self, file_name: &str, csv: Vec<u8>) -> Result<String>;
+
+    /// Add `new` to the dataset `dataset_id`, replacing the CSV distribution its data dictionary
+    /// describes, if any
+    fn add_distribution(
+        &self,
+        dataset_id: &str,
+        new: NewDistribution<'_>,
+    ) -> Result<DistributionAdded>;
+
+    /// Delete the uploaded file `file_name`
+    fn delete_file(&self, file_name: &str) -> Result<()>;
+}
+
 /// DKAN over HTTP, logged in as one user. The password is sent with each request and never
 /// written anywhere.
 pub struct HttpDkan {
@@ -136,30 +160,10 @@ impl HttpDkan {
             .basic_auth(&self.username, Some(&self.password))
     }
 
-    /// Check that DKAN accepts the login for uploads, without uploading anything: the importer
-    /// answers an upload request without a file with "No file uploaded." only once the login and
-    /// the "upload csv files" permission have been accepted.
-    pub fn check_login(&self) -> Result<()> {
-        let response = self.send(self.login_request()?)?;
-        login_checked(&self.base_url, &self.username, &response)
-    }
-
     fn login_request(&self) -> Result<Request> {
         Ok(self
             .authorised(Method::POST, self.base_url.endpoint(&UPLOAD_PATH))
             .build()?)
-    }
-
-    /// The data dictionary `id`, once its own URL, which the distribution will name, answers
-    pub fn data_dictionary(&self, id: &str) -> Result<DataDictionary> {
-        let request = self.dictionaries_request()?;
-        let url = request.url().to_string();
-        let response = self.send(request)?;
-        let dictionary =
-            DataDictionary::from_items(&self.base_url, id, dictionaries(&url, &response)?)?;
-        let response = self.send(self.client.get(&dictionary.url).build()?)?;
-        dictionary_found(id, &dictionary.url, &response)?;
-        Ok(dictionary)
     }
 
     /// The data dictionaries are public: the request carries no login
@@ -176,12 +180,6 @@ impl HttpDkan {
             ]))
             .header(header::ACCEPT, "application/json")
             .build()?)
-    }
-
-    /// Upload `csv` as the file `file_name`; returns the uploaded file's URL
-    pub fn upload_csv(&self, file_name: &str, csv: Vec<u8>) -> Result<String> {
-        let response = self.send(self.upload_request(file_name, csv)?)?;
-        uploaded_file_url(&response)
     }
 
     fn upload_request(&self, file_name: &str, csv: Vec<u8>) -> Result<Request> {
@@ -204,24 +202,6 @@ impl HttpDkan {
             .build()?)
     }
 
-    /// Add `new` to the dataset `dataset_id`, replacing the CSV distribution its data dictionary
-    /// describes, if any
-    pub fn add_distribution(
-        &self,
-        dataset_id: &str,
-        new: NewDistribution<'_>,
-    ) -> Result<DistributionAdded> {
-        let response = self.send(self.dataset_request(Method::GET, dataset_id).build()?)?;
-        let (dataset, added) = dataset_with_distribution(dataset_id, &response, new)?;
-        let response = self.send(
-            self.dataset_request(Method::PATCH, dataset_id)
-                .json(&dataset)
-                .build()?,
-        )?;
-        distribution_saved(dataset_id, &added, &response)?;
-        Ok(added)
-    }
-
     fn dataset_request(&self, method: Method, dataset_id: &str) -> RequestBuilder {
         self.authorised(
             method,
@@ -237,12 +217,6 @@ impl HttpDkan {
         )
     }
 
-    /// Delete the uploaded file `file_name`
-    pub fn delete_file(&self, file_name: &str) -> Result<()> {
-        let response = self.send(self.delete_request(file_name)?)?;
-        file_deleted(file_name, &response)
-    }
-
     /// The DELETE method is not supported for this endpoint, so it is a POST
     fn delete_request(&self, file_name: &str) -> Result<Request> {
         Ok(self
@@ -252,6 +226,52 @@ impl HttpDkan {
                     .endpoint(&["api", "importer", "delete", file_name]),
             )
             .build()?)
+    }
+}
+
+impl Dkan for HttpDkan {
+    /// The importer answers an upload request without a file with "No file uploaded." only once
+    /// the login and the "upload csv files" permission have been accepted.
+    fn check_login(&self) -> Result<()> {
+        let response = self.send(self.login_request()?)?;
+        login_checked(&self.base_url, &self.username, &response)
+    }
+
+    fn data_dictionary(&self, id: &str) -> Result<DataDictionary> {
+        let request = self.dictionaries_request()?;
+        let url = request.url().to_string();
+        let response = self.send(request)?;
+        let dictionary =
+            DataDictionary::from_items(&self.base_url, id, dictionaries(&url, &response)?)?;
+        let response = self.send(self.client.get(&dictionary.url).build()?)?;
+        dictionary_found(id, &dictionary.url, &response)?;
+        Ok(dictionary)
+    }
+
+    fn upload_csv(&self, file_name: &str, csv: Vec<u8>) -> Result<String> {
+        let response = self.send(self.upload_request(file_name, csv)?)?;
+        uploaded_file_url(&response)
+    }
+
+    fn add_distribution(
+        &self,
+        dataset_id: &str,
+        new: NewDistribution<'_>,
+    ) -> Result<DistributionAdded> {
+        let response = self.send(self.dataset_request(Method::GET, dataset_id).build()?)?;
+        let (dataset, added) = dataset_with_distribution(dataset_id, &response, new)?;
+        let response = self.send(
+            self.dataset_request(Method::PATCH, dataset_id)
+                .json(&dataset)
+                .build()?,
+        )?;
+        distribution_saved(dataset_id, &added, &response)?;
+        Ok(added)
+    }
+
+    fn delete_file(&self, file_name: &str) -> Result<()> {
+        let response = self.send(self.delete_request(file_name)?)?;
+        file_deleted(file_name, &response)
     }
 }
 

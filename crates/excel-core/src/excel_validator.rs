@@ -770,6 +770,7 @@ pub struct ExcelValidatorBuilder {
 /// The sheet's leading columns whose headers are schema fields are kept and copied to every row;
 /// every column after them is a sample column. Both fields must be schema fields that are not
 /// sheet columns.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Unpivot {
     /// The field that receives the sample column's header
     pub headers_column: String,

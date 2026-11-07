@@ -5,18 +5,20 @@
 
 use clap::Parser;
 use dkan_importer::{
-    dkan::{HttpDkan, HttpsUrl, NewDistribution},
+    dkan::{HttpDkan, HttpsUrl},
     error_log::{ERRORS_LOG_FILE, append_error_to_log},
-    model::DataDictionary,
-    run_log::{RunLog, changes_lines, ng_per_ml_rows_lines, questions_lines},
+    import::{Environment, Import, run},
+    run_log::RunLog,
     utils::RunFiles,
 };
+use excel_core::anyhow;
 use excel_core::reqwest::blocking::Client;
 use excel_core::{
-    DEFAULT_MARKER_LIMITS, DEFAULT_VALUES_MARKERS, ExcelValidatorBuilder, MarkerLimit, Unpivot,
-    parse_values_marker,
+    DEFAULT_MARKER_LIMITS, DEFAULT_VALUES_MARKERS, MarkerLimit, Unpivot, parse_values_marker,
 };
 use rpassword::prompt_password;
+use std::io;
+use std::path::Path;
 use std::process::ExitCode;
 
 #[derive(Parser)]
@@ -205,7 +207,36 @@ struct Args {
 fn main() -> ExitCode {
     let arguments = Args::parse();
     let files = RunFiles::now(&arguments.dataset_id, &arguments.sheet_name);
-    let log_path = files.log.clone();
+    let unpivot = match (arguments.unpivot, arguments.headers_column) {
+        (true, Some(headers_column)) => Some(Unpivot {
+            headers_column,
+            values_column: arguments.values_column,
+            values_markers: arguments.values_markers,
+            marker_limits: arguments.marker_limits,
+        }),
+        // clap makes --unpivot require --headers-column
+        (true, None) => {
+            eprintln!("❌ --unpivot requires --headers-column");
+            return ExitCode::FAILURE;
+        }
+        (false, _) => None,
+    };
+    let import = Import {
+        excel_file: arguments.excel_file,
+        sheet_name: arguments.sheet_name,
+        data_dictionary_id: arguments.data_dictionary_id,
+        dataset_id: arguments.dataset_id,
+        base_url: arguments.base_url,
+        username: arguments.username,
+        csv_file_name: files.csv,
+        unpivot,
+        extra_columns_to: arguments.extra_columns_to,
+    };
+    let mut environment = Terminal {
+        password: arguments.password,
+    };
+
+    let log_path = files.log;
     let mut log = match RunLog::create(&log_path) {
         Ok(log) => log,
         Err(e) => {
@@ -213,7 +244,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match run(arguments, files.csv, &mut log) {
+    match run(&import, &mut environment, &mut log) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             if let Err(log_error) = log.error(&format!("❌ {e}")) {
@@ -224,139 +255,30 @@ fn main() -> ExitCode {
     }
 }
 
-/// The import itself. Everything it prints also goes to `log`; the password never does.
-fn run(
-    arguments: Args,
-    csv_filename: String,
-    log: &mut RunLog,
-) -> Result<(), Box<dyn std::error::Error>> {
-    log.note(&format!("Excel file: {}", arguments.excel_file))?;
-    log.note(&format!("Sheet: {}", arguments.sheet_name))?;
-    log.note(&format!("Dataset: {}", arguments.dataset_id))?;
-    log.note(&format!(
-        "Data dictionary: {}",
-        arguments.data_dictionary_id
-    ))?;
-    log.note(&format!("DKAN: {}", arguments.base_url))?;
+/// The real environment of an import: the file system, DKAN over HTTP, and the terminal to ask
+/// for the password
+struct Terminal {
+    /// The password given with --password, if any; asked for otherwise
+    password: Option<String>,
+}
 
-    // Validate the url before asking for anything. It must be https because we are using basic auth.
-    let base_url: HttpsUrl = arguments.base_url.parse()?;
+impl Environment for Terminal {
+    type Dkan = HttpDkan;
 
-    let password = match arguments.password {
-        Some(password) => password,
-        None => prompt_password("Password: ")
-            .map_err(|e| format!("Failed to read the password: {e}"))?,
-    };
-    let dkan = HttpDkan::new(base_url, &arguments.username, password, Client::new());
-    // A bad login must stop the run before anything is written
-    dkan.check_login()?;
-    log.info(&format!(
-        "✅ Login accepted for user \"{}\"",
-        arguments.username
-    ))?;
-    let data_dictionary = dkan.data_dictionary(&arguments.data_dictionary_id)?;
-    let json_schema = data_dictionary.to_json_schema()?;
-    let title_to_name_mapping =
-        DataDictionary::create_title_to_name_mapping(&data_dictionary.fields)?;
-    let workbook = std::fs::read(&arguments.excel_file).map_err(|e| {
-        format!(
-            "Cannot read the Excel file \"{}\": {e}",
-            arguments.excel_file
-        )
-    })?;
-    let mut builder = ExcelValidatorBuilder::new(workbook, &arguments.sheet_name, json_schema);
-    if arguments.unpivot {
-        // clap makes --unpivot require --headers-column
-        let headers_column = arguments
-            .headers_column
-            .ok_or("--unpivot requires --headers-column")?;
-        builder = builder.unpivot(Unpivot {
-            headers_column,
-            values_column: arguments.values_column,
-            values_markers: arguments.values_markers,
-            marker_limits: arguments.marker_limits,
-        });
-    }
-    if let Some(field) = &arguments.extra_columns_to {
-        builder = builder.extra_columns_to(field);
-    }
-    let mut validator = builder.build()?;
-    if let Some(summary) = validator.error_cells_summary() {
-        log.info(&format!("⚠️  {summary}"))?;
-    }
-    if let Some(summary) = validator.unpivot_summary() {
-        log.info(&format!("✅ {summary}"))?;
-    }
-    if let Some(summary) = validator.extra_columns_summary() {
-        log.info(&format!("✅ {summary}"))?;
-    }
-    log.notes(&ng_per_ml_rows_lines(validator.ng_per_ml_rows()))?;
-    log.notes(&changes_lines(validator.changes()))?;
-    let questions = validator.questions();
-    if !questions.is_empty() {
-        let cells: usize = questions.iter().map(|(_, cells)| cells).sum();
-        log.info(&format!(
-            "❓ {} question(s) about the data, concerning {} cell(s) not imported or imported on an assumption: see the run log",
-            questions.len(),
-            cells
-        ))?;
-        log.notes(&questions_lines(questions))?;
-    }
-    if let Err(refused) = validator.validate_excel() {
-        let mut message = refused.to_string();
-        if let Some(invalid) = &refused.invalid_rows {
-            // If the log cannot be written, carry the details in the error itself rather than
-            // pointing the user at a log that lacks them
-            match append_error_to_log(
-                std::path::Path::new(ERRORS_LOG_FILE),
-                "Excel Validation Error Report",
-                &invalid.report,
-            ) {
-                Ok(()) => message.push_str(" Check the error log for details."),
-                Err(e) => message.push_str(&format!(
-                    " The error log could not be written ({e}), so the details follow:\n{}",
-                    invalid.report
-                )),
-            }
-        }
-        return Err(message.into());
-    }
-    log.info("✅ Validation completed!")?;
-
-    // Create a csv since the validation is successful. Use schema-aware parsing for proper date formatting.
-    let csv = validator
-        .to_csv(&title_to_name_mapping)
-        .map_err(|e| format!("Failed to create CSV with error: {e}"))?;
-    log.info(&format!("✅ CSV file created: {csv_filename}"))?;
-
-    let file_url = dkan.upload_csv(&csv_filename, csv)?;
-
-    let added = dkan.add_distribution(
-        &arguments.dataset_id,
-        NewDistribution {
-            file_name: &csv_filename,
-            file_url: &file_url,
-            data_dictionary_url: &data_dictionary.url,
-        },
-    )?;
-    match &added.previous_csv_filename {
-        Some(previous) => log.info(&format!(
-            "✅ Successfully replaced CSV distribution '{}' with '{}' in dataset \"{}\" with id \"{}\"",
-            previous, csv_filename, added.dataset_title, arguments.dataset_id
-        ))?,
-        None => log.info(&format!(
-            "✅ Successfully added CSV distribution '{}' to dataset \"{}\" with id \"{}\"",
-            csv_filename, added.dataset_title, arguments.dataset_id
-        ))?,
+    fn read_excel(&mut self, path: &str) -> io::Result<Vec<u8>> {
+        std::fs::read(path)
     }
 
-    // Clean up previous CSV file if one was replaced
-    if let Some(previous_csv_filename) = added.previous_csv_filename {
-        dkan.delete_file(&previous_csv_filename)?;
-        log.info(&format!(
-            "🧹 Previous CSV file successfully deleted: {previous_csv_filename}"
-        ))?;
+    fn connect(&mut self, base_url: HttpsUrl, username: &str) -> anyhow::Result<HttpDkan> {
+        let password = match self.password.take() {
+            Some(password) => password,
+            None => prompt_password("Password: ")
+                .map_err(|e| anyhow::anyhow!("Failed to read the password: {e}"))?,
+        };
+        Ok(HttpDkan::new(base_url, username, password, Client::new()))
     }
 
-    Ok(())
+    fn append_error_log(&mut self, title: &str, details: &str) -> io::Result<()> {
+        append_error_to_log(Path::new(ERRORS_LOG_FILE), title, details)
+    }
 }

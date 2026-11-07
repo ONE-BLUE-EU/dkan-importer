@@ -34,8 +34,10 @@ fn run(extra: &[&str]) -> Output {
     output
 }
 
-/// Run dkan-importer with the required arguments followed by `extra`, in `dir`.
+/// Run dkan-importer with the required arguments followed by `extra`, in `dir`. The Excel file is
+/// read before connecting, but the login fails before it is parsed, so it holds nothing.
 fn run_in(dir: &Path, extra: &[&str]) -> Output {
+    std::fs::write(dir.join("unused.xlsx"), b"").unwrap();
     let base_url = closed_https_url();
     Command::new(env!("CARGO_BIN_EXE_dkan-importer"))
         .current_dir(dir)
