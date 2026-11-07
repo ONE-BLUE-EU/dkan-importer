@@ -147,10 +147,10 @@ pub enum Cell {
     FormulaText(&'static str),
 }
 
-/// Write `rows` (the first row being the headers) to a sheet named "Sheet1" in a new workbook
-/// under the system temp directory, and return its path. `name` must be unique per test.
+/// The bytes of a new .xlsx workbook with `rows` (the first row being the headers) in a sheet named
+/// "Sheet1". Nothing is written to disk.
 #[allow(dead_code)]
-pub fn write_test_workbook(name: &str, rows: &[Vec<Cell>]) -> std::path::PathBuf {
+pub fn test_workbook(rows: &[Vec<Cell>]) -> Vec<u8> {
     use rust_xlsxwriter::{Formula, Workbook};
 
     let mut workbook = Workbook::new();
@@ -183,11 +183,5 @@ pub fn write_test_workbook(name: &str, rows: &[Vec<Cell>]) -> std::path::PathBuf
             }
         }
     }
-    let path = std::env::temp_dir().join(format!(
-        "excel-core-test-{}-{}.xlsx",
-        name,
-        std::process::id()
-    ));
-    workbook.save(&path).unwrap();
-    path
+    workbook.save_to_buffer().unwrap()
 }

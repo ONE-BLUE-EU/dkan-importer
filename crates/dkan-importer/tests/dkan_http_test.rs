@@ -69,17 +69,14 @@ fn dictionary_request_sends_no_placeholder_authorization_header() {
 #[test]
 fn upload_response_without_file_url_is_an_error_not_a_panic() {
     let (base_url, _request) = serve_once("HTTP/1.1 200 OK", r#"{"data":{}}"#);
-    let csv = std::env::temp_dir().join(format!("dkan-importer-upload-{}.csv", std::process::id()));
-    std::fs::write(&csv, "a,b\n1,2\n").unwrap();
-
     let result = upload_distribution_csv_file(
         &base_url,
-        csv.to_str().unwrap(),
+        "data.csv",
+        CSV.to_vec(),
         "user",
         "password",
         &Client::new(),
     );
-    let _ = std::fs::remove_file(&csv);
 
     let message = result
         .expect_err("a response without file_url must be an error")
@@ -93,27 +90,8 @@ const NO_FILE_RESPONSE: &str = r#"{"error":"No file uploaded.","status":"error"}
 /// The start of the "Access denied" page Drupal serves for a rejected login.
 const ACCESS_DENIED_PAGE: &str = "<!DOCTYPE html>\n<html><head><title>Access denied</title></head><body>You are not authorized to access this page.</body></html>";
 
-/// A CSV file under the system temp directory, removed when dropped. `name` must be unique per test.
-struct TempCsv(std::path::PathBuf);
-
-impl TempCsv {
-    fn new(name: &str) -> Self {
-        let path =
-            std::env::temp_dir().join(format!("dkan-importer-{name}-{}.csv", std::process::id()));
-        std::fs::write(&path, "a,b\n1,2\n").unwrap();
-        TempCsv(path)
-    }
-
-    fn path(&self) -> &str {
-        self.0.to_str().unwrap()
-    }
-}
-
-impl Drop for TempCsv {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
-}
+/// The CSV the upload tests send
+const CSV: &[u8] = b"a,b\n1,2\n";
 
 #[test]
 fn login_check_passes_when_the_importer_answers_no_file_uploaded() {
@@ -216,12 +194,16 @@ fn login_check_against_an_unreachable_server_names_the_url() {
 #[test]
 fn rejected_upload_reports_the_status_without_the_page() {
     let (base_url, _request) = serve_once("HTTP/1.1 403 Forbidden", ACCESS_DENIED_PAGE);
-    let csv = TempCsv::new("upload-403");
-
-    let message =
-        upload_distribution_csv_file(&base_url, csv.path(), "user", "password", &Client::new())
-            .expect_err("a 403 must be an error")
-            .to_string();
+    let message = upload_distribution_csv_file(
+        &base_url,
+        "data.csv",
+        CSV.to_vec(),
+        "user",
+        "password",
+        &Client::new(),
+    )
+    .expect_err("a 403 must be an error")
+    .to_string();
 
     assert!(message.contains("403"), "{message}");
     assert!(!message.contains("<html"), "{message}");
@@ -233,12 +215,16 @@ fn failed_upload_reports_the_importer_error_and_details() {
         "HTTP/1.1 500 Internal Server Error",
         r#"{"error":"An error occurred while uploading the file.","status":"error","details":"disk full"}"#,
     );
-    let csv = TempCsv::new("upload-500");
-
-    let message =
-        upload_distribution_csv_file(&base_url, csv.path(), "user", "password", &Client::new())
-            .expect_err("a 500 must be an error")
-            .to_string();
+    let message = upload_distribution_csv_file(
+        &base_url,
+        "data.csv",
+        CSV.to_vec(),
+        "user",
+        "password",
+        &Client::new(),
+    )
+    .expect_err("a 500 must be an error")
+    .to_string();
 
     assert!(message.contains("500"), "{message}");
     assert!(

@@ -267,8 +267,13 @@ fn run(
     let json_schema = data_dictionary.to_json_schema()?;
     let title_to_name_mapping =
         DataDictionary::create_title_to_name_mapping(&data_dictionary.fields)?;
-    let mut builder =
-        ExcelValidatorBuilder::new(&arguments.excel_file, &arguments.sheet_name, json_schema);
+    let workbook = std::fs::read(&arguments.excel_file).map_err(|e| {
+        format!(
+            "Cannot read the Excel file \"{}\": {e}",
+            arguments.excel_file
+        )
+    })?;
+    let mut builder = ExcelValidatorBuilder::new(workbook, &arguments.sheet_name, json_schema);
     if arguments.unpivot {
         // clap makes --unpivot require --headers-column
         let headers_column = arguments
@@ -328,14 +333,15 @@ fn run(
     log.info("✅ Validation completed!")?;
 
     // Create a csv since the validation is successful. Use schema-aware parsing for proper date formatting.
-    validator
-        .export_to_csv(&csv_filename, title_to_name_mapping)
+    let csv = validator
+        .to_csv(&title_to_name_mapping)
         .map_err(|e| format!("Failed to create CSV with error: {e}"))?;
     log.info(&format!("✅ CSV file created: {csv_filename}"))?;
 
     let file_url = upload_distribution_csv_file(
         &arguments.base_url,
         &csv_filename,
+        csv,
         &arguments.username,
         &password,
         &client,
@@ -375,9 +381,6 @@ fn run(
             "🧹 Previous CSV file successfully deleted: {previous_csv_filename}"
         ))?;
     }
-
-    // Also delete the CSV file from the local filesystem
-    std::fs::remove_file(&csv_filename)?;
 
     Ok(())
 }

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use calamine::{Data, Reader, Xlsx, open_workbook};
+use calamine::{Data, Reader, Xlsx};
 use jsonschema::Validator;
 use serde_json::{Map, Value, json};
 use std::borrow::Cow;
@@ -739,7 +739,6 @@ pub struct FieldSchema {
 }
 
 pub struct ExcelValidator {
-    excel_path: String,
     sheet_name: String,
     pub validator: Validator,
     field_schemas: HashMap<String, FieldSchema>,
@@ -757,7 +756,8 @@ pub struct ExcelValidator {
 }
 
 pub struct ExcelValidatorBuilder {
-    excel_path: String,
+    /// The .xlsx file's bytes
+    workbook: Vec<u8>,
     sheet_name: String,
     schema: Value,
     unpivot: Option<Unpivot>,
@@ -993,12 +993,12 @@ impl ExcelValidatorBuilder {
     /// Create a new ExcelValidatorBuilder
     ///
     /// # Arguments
-    /// * `excel_path` - Path to the Excel file
+    /// * `workbook` - The .xlsx file's bytes, read by the caller
     /// * `sheet_name` - Name of the sheet to process
     /// * `schema` - JSON schema for validation
-    pub fn new(excel_path: &str, sheet_name: &str, schema: Value) -> Self {
+    pub fn new(workbook: Vec<u8>, sheet_name: &str, schema: Value) -> Self {
         ExcelValidatorBuilder {
-            excel_path: excel_path.to_string(),
+            workbook,
             sheet_name: sheet_name.to_string(),
             schema,
             unpivot: None,
@@ -1044,7 +1044,6 @@ impl ExcelValidatorBuilder {
 
         // Create temporary validator to process Excel rows
         let temp_validator = ExcelValidator {
-            excel_path: self.excel_path.clone(),
             sheet_name: self.sheet_name.clone(),
             validator: jsonschema::validator_for(&self.schema)
                 .map_err(|e| anyhow::anyhow!("Invalid JSON schema: {}", e))?,
@@ -1063,11 +1062,13 @@ impl ExcelValidatorBuilder {
         };
 
         // Process Excel rows once during build
-        let sheet = temp_validator
-            .process_excel_rows(self.unpivot.as_ref(), self.extra_columns_to.as_deref())?;
+        let sheet = temp_validator.process_excel_rows(
+            &self.workbook,
+            self.unpivot.as_ref(),
+            self.extra_columns_to.as_deref(),
+        )?;
 
         Ok(ExcelValidator {
-            excel_path: self.excel_path,
             sheet_name: self.sheet_name,
             validator,
             field_schemas,
@@ -1101,7 +1102,6 @@ impl ExcelValidator {
         let field_schemas = Self::extract_field_schemas(schema)?;
 
         Ok(ExcelValidator {
-            excel_path: String::new(),
             sheet_name: String::new(),
             validator,
             field_schemas,
@@ -1298,16 +1298,13 @@ impl ExcelValidator {
         Ok(())
     }
 
-    /// Export Excel data to CSV with schema-aware parsing
-    pub fn export_to_csv(
-        &self,
-        csv_path: &str,
-        title_to_name_mapping: HashMap<String, String>,
-    ) -> Result<()> {
+    /// The CSV of the rows, with schema-aware parsing, headed by the dictionary names that
+    /// `title_to_name_mapping` gives the titles
+    pub fn to_csv(&self, title_to_name_mapping: &HashMap<String, String>) -> Result<Vec<u8>> {
         // Configure CSV writer to quote fields when necessary (e.g., when they contain commas)
         let mut wtr = csv::WriterBuilder::new()
             .quote_style(csv::QuoteStyle::Necessary)
-            .from_path(csv_path)?;
+            .from_writer(Vec::new());
 
         // Map Excel headers (titles) to dictionary names for CSV output
         let csv_headers: Vec<String> = self
@@ -1382,9 +1379,8 @@ impl ExcelValidator {
             wtr.write_record(&csv_record)?;
         }
 
-        wtr.flush()?;
-
-        Ok(())
+        wtr.into_inner()
+            .map_err(|e| anyhow::anyhow!("Cannot write the CSV: {}", e.error()))
     }
 
     //////////////////////////////////////////////////////////////
@@ -1493,15 +1489,12 @@ impl ExcelValidator {
     /// Returns headers and a vector of (row_number, parsed_json_object) tuples
     fn process_excel_rows(
         &self,
+        workbook: &[u8],
         unpivot: Option<&Unpivot>,
         extra_columns_to: Option<&str>,
     ) -> Result<ProcessedSheet> {
-        let mut workbook: Xlsx<_> = open_workbook(&self.excel_path).with_context(|| {
-            format!(
-                "The Excel file does not exist in the provided path: \"{}\"",
-                self.excel_path
-            )
-        })?;
+        let mut workbook = Xlsx::new(std::io::Cursor::new(workbook))
+            .context("The Excel file is not a valid .xlsx workbook")?;
 
         // Get the sheet to process
         let range = workbook

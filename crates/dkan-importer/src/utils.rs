@@ -94,25 +94,20 @@ fn describe_failure(status: StatusCode, body: &str) -> String {
     }
 }
 
-// Function to upload CSV to custom importer endpoint
+/// Upload `csv` as the file `file_name` to the importer module; returns the uploaded file's URL
 pub fn upload_distribution_csv_file(
     url: &str,
-    csv_path: &str,
+    file_name: &str,
+    csv: Vec<u8>,
     username: &str,
     password: &str,
     client: &Client,
 ) -> Result<String, anyhow::Error> {
-    let csv_content = std::fs::read(csv_path)?;
-    let filename = std::path::Path::new(csv_path)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("data.csv");
-
     // Create multipart form with the CSV file
     let form = Form::new().part(
         "csv",
-        Part::bytes(csv_content)
-            .file_name(filename.to_string())
+        Part::bytes(csv)
+            .file_name(file_name.to_string())
             .mime_str("text/csv")?,
     );
 

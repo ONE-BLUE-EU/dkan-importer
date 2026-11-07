@@ -1,5 +1,3 @@
-use excel_core::ExcelValidator;
-use excel_core::ExcelValidatorBuilder;
 use excel_core::serde_json::{Map, Value, json};
 use std::collections::HashMap;
 
@@ -91,24 +89,6 @@ fn convert_schema_to_dkan_format(schema: &Value) -> Value {
     }
 
     Value::Object(dkan_format)
-}
-
-/// Creates a test validator with the default test schema
-#[allow(dead_code)]
-pub fn create_test_validator() -> ExcelValidator {
-    let schema = create_test_schema();
-    ExcelValidatorBuilder::new("test.xlsx", "Sheet1", schema)
-        .build()
-        .unwrap()
-}
-
-// Creates a test validator with a custom schema
-// It is used in tests that need a custom schema
-#[allow(dead_code)]
-pub fn create_test_validator_with_schema(schema: &Value) -> ExcelValidator {
-    ExcelValidatorBuilder::new("test.xlsx", "Sheet1", schema.clone())
-        .build()
-        .unwrap()
 }
 
 // Creates a test title-to-name mapping for testing

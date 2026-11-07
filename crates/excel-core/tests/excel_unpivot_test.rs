@@ -1,10 +1,10 @@
 //! Unpivoting a wide sheet (one column per sample) into one row per sample cell, through the real
-//! file pipeline: write an .xlsx, build the validator from it, validate, and export the CSV.
+//! file pipeline: build an .xlsx in memory, build the validator from it, validate, and export the CSV.
 
 mod common;
 
 use common::Cell::{self, Empty, Error, FormulaText, Number, Text};
-use common::{create_simple_mapping, write_test_workbook};
+use common::{create_simple_mapping, test_workbook};
 use excel_core::serde_json::json;
 use excel_core::{
     DEFAULT_MARKER_LIMITS, DEFAULT_VALUES_MARKERS, ExcelValidatorBuilder, IDENTIFICATION_LEVEL,
@@ -99,78 +99,65 @@ impl Unpivoted {
 }
 
 /// Build with `unpivot`, validate and export `rows` (the first row being the headers).
-fn run(name: &str, rows: &[Vec<Cell>], unpivot: Unpivot) -> Result<Unpivoted, String> {
-    run_with_schema(name, rows, unpivot, schema())
+fn run(rows: &[Vec<Cell>], unpivot: Unpivot) -> Result<Unpivoted, String> {
+    run_with_schema(rows, unpivot, schema())
 }
 
 /// [`run`] against `schema` instead of the default dictionary.
 fn run_with_schema(
-    name: &str,
     rows: &[Vec<Cell>],
     unpivot: Unpivot,
     schema: excel_core::serde_json::Value,
 ) -> Result<Unpivoted, String> {
-    let xlsx = write_test_workbook(name, rows);
-    let csv = xlsx.with_extension("csv");
-
-    let result = (|| {
-        let mut validator = ExcelValidatorBuilder::new(xlsx.to_str().unwrap(), "Sheet1", schema)
-            .unpivot(unpivot)
-            .build()
-            .map_err(|e| format!("{e:#}"))?;
-        let summary = validator
-            .unpivot_summary()
-            .ok_or("an unpivoted sheet must have a summary")?
-            .to_string();
-        let error_cells = validator.error_cells_summary().map(String::from);
-        let changes = validator
-            .changes()
+    let mut validator = ExcelValidatorBuilder::new(test_workbook(rows), "Sheet1", schema)
+        .unpivot(unpivot)
+        .build()
+        .map_err(|e| format!("{e:#}"))?;
+    let summary = validator
+        .unpivot_summary()
+        .ok_or("an unpivoted sheet must have a summary")?
+        .to_string();
+    let error_cells = validator.error_cells_summary().map(String::from);
+    let changes = validator
+        .changes()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    let questions = validator
+        .questions()
+        .iter()
+        .map(|(question, cells)| format!("{cells} cell(s): {question}"))
+        .collect();
+    validator.validate_excel().map_err(|e| {
+        let details: Vec<String> = validator
+            .validation_reports
             .iter()
-            .map(ToString::to_string)
+            .flat_map(|r| r.errors.iter().map(|e| e.to_string()))
             .collect();
-        let questions = validator
-            .questions()
-            .iter()
-            .map(|(question, cells)| format!("{cells} cell(s): {question}"))
-            .collect();
-        validator.validate_excel().map_err(|e| {
-            let details: Vec<String> = validator
-                .validation_reports
-                .iter()
-                .flat_map(|r| r.errors.iter().map(|e| e.to_string()))
-                .collect();
-            format!("{e}: {}", details.join(" | "))
-        })?;
-        validator
-            .export_to_csv(
-                csv.to_str().unwrap(),
-                create_simple_mapping(vec![
-                    "Substance",
-                    "Identification Level",
-                    "Concentration units",
-                    "Limit of detection",
-                    "Limit of quantification",
-                    "Detection characterisation",
-                    "Sample Tag",
-                    "Concentration",
-                ]),
-            )
-            .map_err(|e| e.to_string())?;
-        let mut unpivoted = Unpivoted {
-            summary,
-            error_cells,
-            changes,
-            questions,
-            csv: std::fs::read_to_string(&csv).unwrap(),
-            csv_lines: Vec::new(),
-        };
-        unpivoted.csv_lines = unpivoted.columns(&["Substance", "Sample Tag", "Concentration"]);
-        Ok(unpivoted)
-    })();
-
-    let _ = std::fs::remove_file(&xlsx);
-    let _ = std::fs::remove_file(&csv);
-    result
+        format!("{e}: {}", details.join(" | "))
+    })?;
+    let csv = validator
+        .to_csv(&create_simple_mapping(vec![
+            "Substance",
+            "Identification Level",
+            "Concentration units",
+            "Limit of detection",
+            "Limit of quantification",
+            "Detection characterisation",
+            "Sample Tag",
+            "Concentration",
+        ]))
+        .map_err(|e| e.to_string())?;
+    let mut unpivoted = Unpivoted {
+        summary,
+        error_cells,
+        changes,
+        questions,
+        csv: String::from_utf8(csv).map_err(|e| e.to_string())?,
+        csv_lines: Vec::new(),
+    };
+    unpivoted.csv_lines = unpivoted.columns(&["Substance", "Sample Tag", "Concentration"]);
+    Ok(unpivoted)
 }
 
 fn wide_sheet() -> Vec<Vec<Cell>> {
@@ -208,7 +195,7 @@ fn wide_sheet() -> Vec<Vec<Cell>> {
 
 #[test]
 fn each_sample_cell_becomes_a_row_with_the_column_header_and_the_cell_value() {
-    let unpivoted = run("unpivot-rows", &wide_sheet(), spec()).unwrap();
+    let unpivoted = run(&wide_sheet(), spec()).unwrap();
 
     // The blank source row and the blank sample cell produce no rows: a blank cell is no result
     let expected = vec![
@@ -222,7 +209,7 @@ fn each_sample_cell_becomes_a_row_with_the_column_header_and_the_cell_value() {
 
 #[test]
 fn the_summary_names_the_kept_and_the_unpivoted_columns_and_the_row_count() {
-    let unpivoted = run("unpivot-summary", &wide_sheet(), spec()).unwrap();
+    let unpivoted = run(&wide_sheet(), spec()).unwrap();
 
     let expected = "Keeping 5 column(s) A-E (Substance … Limit of quantification); unpivoting 2 column(s) F-G (ST01 … ST02) into Sample Tag / Concentration: 3 row(s); 1 blank sample cell(s) skipped.";
     assert_eq!(unpivoted.summary, expected);
@@ -243,7 +230,7 @@ fn blank_sample_cells_in_every_form_produce_no_row() {
         FormulaText(""),
     ]);
 
-    let unpivoted = run_with_schema("unpivot-blanks", &rows, spec(), text_schema()).unwrap();
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
         "Substance,Sample Tag,Concentration",
@@ -258,7 +245,7 @@ fn blank_sample_cells_in_every_form_produce_no_row() {
 fn without_blank_sample_cells_the_summary_does_not_mention_them() {
     let rows = marker_sheet([Number(0.88), Number(0.4), Number(1.25)]);
 
-    let unpivoted = run("unpivot-no-blanks", &rows, spec()).unwrap();
+    let unpivoted = run(&rows, spec()).unwrap();
 
     let expected = "Keeping 5 column(s) A-E (Substance … Limit of quantification); unpivoting 3 column(s) F-H (ST01 … ST03) into Sample Tag / Concentration: 3 row(s).";
     assert_eq!(unpivoted.summary, expected);
@@ -296,7 +283,7 @@ fn text_in_the_values_column_is_a_validation_error_at_its_source_row() {
         ],
     ];
 
-    let err = run("unpivot-text-value", &rows, spec()).unwrap_err();
+    let err = run(&rows, spec()).unwrap_err();
 
     let expected = "row[3]./Concentration";
     assert!(err.contains(expected), "{err}");
@@ -311,8 +298,7 @@ fn a_headers_column_that_is_not_a_dictionary_field_is_refused_with_the_candidate
         ..spec()
     };
 
-    let err = run("unpivot-unknown-field", &wide_sheet(), unpivot)
-        .expect_err("an unknown field must be refused");
+    let err = run(&wide_sheet(), unpivot).expect_err("an unknown field must be refused");
 
     assert!(err.contains("headers column \"Sample\""), "{err}");
     assert!(
@@ -330,8 +316,7 @@ fn a_values_column_that_is_already_a_sheet_column_is_refused_with_the_candidates
         ..spec()
     };
 
-    let err = run("unpivot-sheet-column", &wide_sheet(), unpivot)
-        .expect_err("a sheet column must be refused");
+    let err = run(&wide_sheet(), unpivot).expect_err("a sheet column must be refused");
 
     assert!(
         err.contains("values column \"Concentration units\""),
@@ -352,8 +337,7 @@ fn the_same_field_for_headers_and_values_is_refused() {
         ..spec()
     };
 
-    let err = run("unpivot-same-field", &wide_sheet(), unpivot)
-        .expect_err("the same field twice must be refused");
+    let err = run(&wide_sheet(), unpivot).expect_err("the same field twice must be refused");
 
     assert!(err.contains("must be different fields"), "{err}");
 }
@@ -365,7 +349,7 @@ fn a_sheet_that_starts_with_a_sample_column_is_refused() {
         vec![Number(0.88), Text("Okadaic acid")],
     ];
 
-    let err = run("unpivot-no-kept", &rows, spec()).expect_err("no kept columns must be refused");
+    let err = run(&rows, spec()).expect_err("no kept columns must be refused");
 
     assert!(err.contains("starts with column A \"ST01\""), "{err}");
 }
@@ -389,8 +373,7 @@ fn a_sheet_without_sample_columns_is_refused() {
         ],
     ];
 
-    let err =
-        run("unpivot-no-samples", &rows, spec()).expect_err("no sample columns must be refused");
+    let err = run(&rows, spec()).expect_err("no sample columns must be refused");
 
     assert!(err.contains("no sample columns"), "{err}");
 }
@@ -419,8 +402,7 @@ fn a_dictionary_field_among_the_sample_columns_is_refused() {
         ],
     ];
 
-    let err = run("unpivot-misplaced-field", &rows, spec())
-        .expect_err("a misplaced dictionary field must be refused");
+    let err = run(&rows, spec()).expect_err("a misplaced dictionary field must be refused");
 
     let expected = "column D \"Concentration units\" is a data dictionary field after the first sample column C \"ST01\"";
     assert!(err.contains(expected), "{err}");
@@ -449,8 +431,7 @@ fn a_sample_column_without_a_header_is_refused() {
         ],
     ];
 
-    let err = run("unpivot-unnamed-sample", &rows, spec())
-        .expect_err("a sample column without a header must be refused");
+    let err = run(&rows, spec()).expect_err("a sample column without a header must be refused");
 
     assert!(
         err.contains("column G (first value at row 2: \"0.4\")"),
@@ -484,7 +465,7 @@ fn excel_error_cells_are_emptied_so_a_sample_error_gives_no_row() {
         ],
     ];
 
-    let unpivoted = run("unpivot-error-cells", &rows, spec()).unwrap();
+    let unpivoted = run(&rows, spec()).unwrap();
 
     let expected = vec![
         "Substance,Sample Tag,Concentration",
@@ -545,7 +526,7 @@ fn a_text_values_field_takes_numbers_and_markers_as_written() {
         Text("0.5"),
     ]);
 
-    let unpivoted = run_with_schema("unpivot-markers", &rows, spec(), text_schema()).unwrap();
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
         "Substance,Sample Tag,Concentration",
@@ -562,7 +543,7 @@ fn a_text_values_field_takes_numbers_and_markers_as_written() {
 fn other_text_in_a_text_values_field_is_a_validation_error_naming_the_markers() {
     let rows = marker_sheet([Text("<LDO"), Text("n.d."), Text("NaN")]);
 
-    let err = run_with_schema("unpivot-bad-marker", &rows, spec(), text_schema()).unwrap_err();
+    let err = run_with_schema(&rows, spec(), text_schema()).unwrap_err();
 
     for value in ["<LDO", "n.d.", "NaN"] {
         let expected = format!(
@@ -580,7 +561,7 @@ fn given_markers_replace_the_default_ones() {
     };
     let rows = marker_sheet([Text("<MDL"), Text("<LOD"), Number(0.4)]);
 
-    let err = run_with_schema("unpivot-own-markers", &rows, unpivot, text_schema()).unwrap_err();
+    let err = run_with_schema(&rows, unpivot, text_schema()).unwrap_err();
 
     let expected = "row[2]./Concentration: '<LOD' is not a number or one of the markers <MDL";
     assert!(err.contains(expected), "{err}");
@@ -589,13 +570,7 @@ fn given_markers_replace_the_default_ones() {
 
 #[test]
 fn the_summary_of_a_text_values_field_names_the_markers() {
-    let unpivoted = run_with_schema(
-        "unpivot-markers-summary",
-        &wide_sheet(),
-        spec(),
-        text_schema(),
-    )
-    .unwrap();
+    let unpivoted = run_with_schema(&wide_sheet(), spec(), text_schema()).unwrap();
 
     let expected = "Keeping 5 column(s) A-E (Substance … Limit of quantification); unpivoting 2 column(s) F-G (ST01 … ST02) into Sample Tag / Concentration: 3 row(s); 1 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ, X.";
     assert_eq!(unpivoted.summary, expected);
@@ -635,7 +610,7 @@ fn a_marker_followed_by_the_rows_limit_is_written_as_the_marker() {
         [Text("<LOQ:0.25"), Text("<LOD : 0.100"), Number(0.3)],
     );
 
-    let unpivoted = run_with_schema("unpivot-limit-match", &rows, spec(), text_schema()).unwrap();
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
         "Substance,Sample Tag,Concentration",
@@ -656,7 +631,7 @@ fn a_marker_followed_by_the_rows_limit_is_written_as_the_marker() {
 fn without_such_values_the_summary_does_not_mention_limits() {
     let rows = limits_sheet(Number(0.25), [Text("<LOQ"), Text("NS"), Number(0.3)]);
 
-    let unpivoted = run_with_schema("unpivot-limit-none", &rows, spec(), text_schema()).unwrap();
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     assert!(
         unpivoted
@@ -674,7 +649,7 @@ fn a_marker_followed_by_another_number_is_a_validation_error_naming_the_rows_lim
         [Text("<LOQ:0.3"), Text("<LOQ:abc"), Text("<LOQ:0.25")],
     );
 
-    let err = run_with_schema("unpivot-limit-mismatch", &rows, spec(), text_schema()).unwrap_err();
+    let err = run_with_schema(&rows, spec(), text_schema()).unwrap_err();
 
     for value in ["<LOQ:0.3", "<LOQ:abc"] {
         let expected = format!(
@@ -689,7 +664,7 @@ fn a_marker_followed_by_another_number_is_a_validation_error_naming_the_rows_lim
 fn a_marker_followed_by_a_number_in_a_row_without_its_limit_is_a_validation_error() {
     let rows = limits_sheet(Empty, [Text("<LOQ:0.25"), Text("<LOQ"), Number(0.3)]);
 
-    let err = run_with_schema("unpivot-limit-blank", &rows, spec(), text_schema()).unwrap_err();
+    let err = run_with_schema(&rows, spec(), text_schema()).unwrap_err();
 
     let expected = "row[2]./Concentration: '<LOQ:0.25' has a number, but the row has no Limit of quantification";
     assert!(err.contains(expected), "{err}");
@@ -700,7 +675,7 @@ fn a_marker_followed_by_a_number_in_a_row_without_its_limit_is_a_validation_erro
 fn a_marker_without_a_limit_followed_by_a_number_is_a_validation_error() {
     let rows = limits_sheet(Number(0.25), [Text("NS:0.25"), Text("NS"), Number(0.3)]);
 
-    let err = run_with_schema("unpivot-limit-ns", &rows, spec(), text_schema()).unwrap_err();
+    let err = run_with_schema(&rows, spec(), text_schema()).unwrap_err();
 
     let expected =
         "row[2]./Concentration: 'NS:0.25' is not a number or one of the markers <LOD, <LOQ";
@@ -715,7 +690,7 @@ fn a_limit_that_is_not_a_dictionary_field_is_refused() {
     };
     let rows = limits_sheet(Number(0.25), [Text("<LOQ"), Text("NS"), Number(0.3)]);
 
-    let err = run_with_schema("unpivot-limit-unknown", &rows, unpivot, text_schema()).unwrap_err();
+    let err = run_with_schema(&rows, unpivot, text_schema()).unwrap_err();
 
     assert!(err.contains("\"Limit of quant\""), "{err}");
     assert!(err.contains("not a data dictionary field"), "{err}");
@@ -730,7 +705,7 @@ fn a_limit_for_a_marker_that_is_not_a_values_marker_does_not_apply() {
     };
     let rows = limits_sheet(Number(0.25), [Text("<LOD"), Text("<LOQ:0.25"), Number(0.3)]);
 
-    let err = run_with_schema("unpivot-limit-marker", &rows, unpivot, text_schema()).unwrap_err();
+    let err = run_with_schema(&rows, unpivot, text_schema()).unwrap_err();
 
     let expected = "row[2]./Concentration: '<LOQ:0.25' is not a number or one of the markers <LOD";
     assert!(err.contains(expected), "{err}");
@@ -746,7 +721,6 @@ fn a_number_values_field_ignores_the_limits() {
     let rows = limits_sheet(Number(0.25), [Number(0.1), Number(0.2), Number(0.3)]);
 
     let unpivoted = run_with_schema(
-        "unpivot-limit-number",
         &rows,
         unpivot,
         schema_with_concentration(json!({ "type": ["number", "null"] })),
@@ -787,7 +761,7 @@ fn nd_among_the_given_markers_is_refused_as_it_gives_no_row() {
         };
         let rows = marker_sheet([Text("<LOD"), Text("<LOD"), Number(0.4)]);
 
-        let err = run_with_schema("unpivot-nd-marker", &rows, unpivot, text_schema()).unwrap_err();
+        let err = run_with_schema(&rows, unpivot, text_schema()).unwrap_err();
 
         let expected = format!(
             "\"{}\" cannot be a values marker: ND cells are treated as NS (no sample) and give no row.",
@@ -812,7 +786,7 @@ fn nd_cells_are_treated_as_ns_and_give_no_row() {
         Empty,
     ]);
 
-    let unpivoted = run_with_schema("unpivot-nd-cell", &rows, spec(), text_schema()).unwrap();
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
         "Substance,Sample Tag,Concentration",
@@ -843,7 +817,7 @@ fn lq_among_the_given_markers_is_refused_pointing_to_loq() {
     };
     let rows = marker_sheet([Text("<LOQ"), Text("<LOQ"), Number(0.4)]);
 
-    let err = run_with_schema("unpivot-lq-marker", &rows, unpivot, text_schema()).unwrap_err();
+    let err = run_with_schema(&rows, unpivot, text_schema()).unwrap_err();
 
     let expected = "\"<LQ\" cannot be a values marker: <LQ maps to <LOQ. Use <LOQ, and change <LQ to <LOQ in the source file, for consistency.";
     assert!(err.contains(expected), "{err}");
@@ -857,7 +831,7 @@ fn lq_in_a_sample_cell_is_a_validation_error_pointing_to_loq() {
         [Text("<LQ"), Text("<lq : 0.25"), Text("<LOQ:0.25")],
     );
 
-    let err = run_with_schema("unpivot-lq-cell", &rows, spec(), text_schema()).unwrap_err();
+    let err = run_with_schema(&rows, spec(), text_schema()).unwrap_err();
 
     for value in ["<LQ", "<lq : 0.25"] {
         let expected = format!(
@@ -877,7 +851,7 @@ fn nq_among_the_given_markers_is_refused_pointing_to_loq() {
     };
     let rows = marker_sheet([Text("<LOQ"), Text("<LOQ"), Number(0.4)]);
 
-    let err = run_with_schema("unpivot-nq-marker", &rows, unpivot, text_schema()).unwrap_err();
+    let err = run_with_schema(&rows, unpivot, text_schema()).unwrap_err();
 
     let expected = "\"NQ\" cannot be a values marker: NQ maps to <LOQ. Use <LOQ, and change NQ to <LOQ in the source file, for consistency.";
     assert!(err.contains(expected), "{err}");
@@ -891,7 +865,7 @@ fn nq_in_a_sample_cell_is_a_validation_error_pointing_to_loq() {
         [Text("NQ"), Text("nq : 0.25"), Text("<LOQ:0.25")],
     );
 
-    let err = run_with_schema("unpivot-nq-cell", &rows, spec(), text_schema()).unwrap_err();
+    let err = run_with_schema(&rows, spec(), text_schema()).unwrap_err();
 
     for value in ["NQ", "nq : 0.25"] {
         let expected = format!(
@@ -921,7 +895,7 @@ fn markers_match_ignoring_case_and_are_written_uppercase() {
         Text("<LoD"),
     ]);
 
-    let unpivoted = run_with_schema("unpivot-marker-case", &rows, unpivot, text_schema()).unwrap();
+    let unpivoted = run_with_schema(&rows, unpivot, text_schema()).unwrap();
 
     let expected = vec![
         "Substance,Sample Tag,Concentration",
@@ -944,8 +918,7 @@ fn a_marker_given_in_lowercase_is_taken_uppercase() {
     };
     let rows = marker_sheet([Text("<mdl"), Text("<MDL"), Text("<LDO")]);
 
-    let err =
-        run_with_schema("unpivot-lowercase-marker", &rows, unpivot, text_schema()).unwrap_err();
+    let err = run_with_schema(&rows, unpivot, text_schema()).unwrap_err();
 
     let expected = "row[2]./Concentration: '<LDO' is not a number or one of the markers <MDL";
     assert!(err.contains(expected), "{err}");
@@ -966,7 +939,7 @@ fn a_marker_with_the_rows_limit_matches_ignoring_case() {
         [Text("<loq:0.25"), Text("<Loq : 0.25"), Text("<LOQ")],
     );
 
-    let unpivoted = run_with_schema("unpivot-limit-case", &rows, unpivot, text_schema()).unwrap();
+    let unpivoted = run_with_schema(&rows, unpivot, text_schema()).unwrap();
 
     let expected = vec![
         "Substance,Sample Tag,Concentration",
@@ -1031,7 +1004,7 @@ fn a_dictionary_without_the_identification_level_field_is_refused() {
         vec![Text("Okadaic acid"), Number(0.88)],
     ];
 
-    let err = run_with_schema("unpivot-no-level-field", &rows, spec(), schema).unwrap_err();
+    let err = run_with_schema(&rows, spec(), schema).unwrap_err();
 
     let expected = "the data dictionary has no field \"Identification Level\"";
     assert!(err.contains(expected), "{err}");
@@ -1044,7 +1017,7 @@ fn a_sheet_without_the_identification_level_column_is_refused() {
         vec![Text("Okadaic acid"), Number(0.88)],
     ];
 
-    let err = run("unpivot-no-level-column", &rows, spec()).unwrap_err();
+    let err = run(&rows, spec()).unwrap_err();
 
     let expected = "it has no \"Identification Level\" column before the sample columns";
     assert!(err.contains(expected), "{err}");
@@ -1054,7 +1027,7 @@ fn a_sheet_without_the_identification_level_column_is_refused() {
 fn an_identification_level_of_2a_is_kept_as_written() {
     let rows = levels_sheet(vec![Text(IDENTIFICATION_LEVEL), Text(" 2A ")]);
 
-    let unpivoted = run("unpivot-level-2a", &rows, spec()).unwrap();
+    let unpivoted = run(&rows, spec()).unwrap();
 
     let columns = [
         "Substance",
@@ -1082,7 +1055,7 @@ fn rows_whose_identification_level_is_not_2a_stop_the_run_listing_each() {
     rows.push(level_row(Number(2.0), Empty));
     rows.push(level_row(Number(2.0), Text("NS")));
 
-    let err = run("unpivot-level-not-2a", &rows, spec()).unwrap_err();
+    let err = run(&rows, spec()).unwrap_err();
 
     let expected = "The sheet \"Sheet1\" has 3 row(s) whose Identification Level is not 2A. \
 Analytical results are always identification level 2A: correct these cells in the source file and try again:
@@ -1100,7 +1073,7 @@ Analytical results are always identification level 2A: correct these cells in th
 fn ns_cells_give_no_row_and_are_counted() {
     let rows = marker_sheet([Text("NS"), Text(" ns "), Number(0.4)]);
 
-    let unpivoted = run_with_schema("unpivot-ns", &rows, spec(), text_schema()).unwrap();
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
         "Substance,Sample Tag,Concentration",
@@ -1115,7 +1088,7 @@ fn ns_cells_give_no_row_and_are_counted() {
 fn ns_cells_give_no_row_also_with_a_number_values_field() {
     let rows = marker_sheet([Text("NS"), Number(0.88), Number(0.4)]);
 
-    let unpivoted = run("unpivot-ns-number", &rows, spec()).unwrap();
+    let unpivoted = run(&rows, spec()).unwrap();
 
     let expected = vec![
         "Substance,Sample Tag,Concentration",
@@ -1134,7 +1107,7 @@ fn ns_among_the_given_markers_is_refused_as_it_gives_no_row() {
         };
         let rows = marker_sheet([Text("<LOD"), Number(0.88), Number(0.4)]);
 
-        let err = run_with_schema("unpivot-ns-marker", &rows, unpivot, text_schema()).unwrap_err();
+        let err = run_with_schema(&rows, unpivot, text_schema()).unwrap_err();
 
         let expected = format!(
             "\"{}\" cannot be a values marker: NS (no sample) cells give no row.",
@@ -1161,7 +1134,7 @@ fn every_change_to_a_sample_cell_is_listed_with_its_reason() {
         Text("<LOD"),
     ]);
 
-    let unpivoted = run_with_schema("unpivot-changes", &rows, spec(), text_schema()).unwrap();
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
         "row 2, column F \"ST01\": written as \"<LOQ\" instead of \"<loq:0.25\": the number after the marker is the row's Limit of quantification",
@@ -1176,7 +1149,7 @@ fn every_change_to_a_sample_cell_is_listed_with_its_reason() {
 fn a_sheet_taken_as_written_lists_no_changes() {
     let rows = limits_sheet(Number(0.25), [Text("<LOQ"), Text(" <LOD "), Number(0.3)]);
 
-    let unpivoted = run_with_schema("unpivot-no-changes", &rows, spec(), text_schema()).unwrap();
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     assert_eq!(unpivoted.changes, Vec::<String>::new());
 }
@@ -1239,7 +1212,7 @@ fn ng_l_results_are_characterised_against_the_rows_limits() {
         ],
     );
 
-    let unpivoted = run_with_schema("detection-ng-l", &rows, spec(), text_schema()).unwrap();
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
         "Sample Tag,Concentration,Detection characterisation",
@@ -1271,7 +1244,7 @@ fn x_is_detected_qualitatively_in_peak_area_rows_and_in_rows_without_units() {
         ],
     );
 
-    let unpivoted = run_with_schema("detection-x", &rows, spec(), text_schema()).unwrap();
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
         "Sample Tag,Concentration,Detection characterisation",
@@ -1301,7 +1274,7 @@ fn items_are_whole_numbers_detected_quantitatively() {
         ]],
     );
 
-    let unpivoted = run_with_schema("detection-items", &rows, spec(), text_schema()).unwrap();
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
         "Sample Tag,Concentration,Detection characterisation",
@@ -1327,7 +1300,7 @@ fn items_that_are_not_whole_numbers_give_no_row_and_a_question() {
         ]],
     );
 
-    let unpivoted = run_with_schema("detection-items-bad", &rows, spec(), text_schema()).unwrap();
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
         "Sample Tag,Concentration,Detection characterisation",
@@ -1360,7 +1333,7 @@ fn x_in_an_ng_l_row_gives_no_row_and_a_question() {
         ]],
     );
 
-    let unpivoted = run_with_schema("detection-x-ng-l", &rows, spec(), text_schema()).unwrap();
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
         "Sample Tag,Concentration,Detection characterisation",
@@ -1398,7 +1371,7 @@ fn unclear_results_give_no_row_and_a_question() {
         ],
     );
 
-    let unpivoted = run_with_schema("detection-unclear", &rows, spec(), text_schema()).unwrap();
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
         "Sample Tag,Concentration,Detection characterisation",
@@ -1440,7 +1413,7 @@ fn a_characterisation_that_differs_from_the_sheets_is_listed_with_its_reason() {
         ]],
     );
 
-    let unpivoted = run_with_schema("detection-differs", &rows, spec(), text_schema()).unwrap();
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
         "Sample Tag,Concentration,Detection characterisation",
@@ -1465,7 +1438,7 @@ fn a_dictionary_without_the_detection_characterisation_field_is_refused() {
         .remove("Detection characterisation")
         .expect("the test dictionary has the field to remove");
 
-    let err = run_with_schema("detection-no-field", &wide_sheet(), spec(), schema).unwrap_err();
+    let err = run_with_schema(&wide_sheet(), spec(), schema).unwrap_err();
 
     let expected = "the data dictionary has no field \"Detection characterisation\", which analytical results need";
     assert!(err.contains(expected), "{err}");
@@ -1490,7 +1463,7 @@ fn a_sheet_without_the_concentration_units_column_is_refused() {
         ],
     ];
 
-    let err = run("detection-no-units", &rows, spec()).unwrap_err();
+    let err = run(&rows, spec()).unwrap_err();
 
     let expected = "it has no \"Concentration units\" column before the sample columns";
     assert!(err.contains(expected), "{err}");
@@ -1517,9 +1490,7 @@ fn every_problem_is_reported_in_one_run_with_the_changes_and_questions() {
     );
     // Row 4's identification level is not 2A
     rows[3][1] = Number(1.0);
-    let xlsx = write_test_workbook("all-problems", &rows);
-
-    let mut validator = ExcelValidatorBuilder::new(xlsx.to_str().unwrap(), "Sheet1", text_schema())
+    let mut validator = ExcelValidatorBuilder::new(test_workbook(&rows), "Sheet1", text_schema())
         .unpivot(spec())
         .build()
         .unwrap_or_else(|e| panic!("the problems must not stop the build: {e:#}"));
@@ -1537,7 +1508,6 @@ fn every_problem_is_reported_in_one_run_with_the_changes_and_questions() {
         .validate_excel()
         .expect_err("the problems must stop the run")
         .to_string();
-    let _ = std::fs::remove_file(&xlsx);
 
     let expected = vec![
         "row 2, column G \"ST01\": no row: X in an ng/L row",
@@ -1564,13 +1534,11 @@ struct NgPerMlRun {
     error: Option<String>,
 }
 
-fn run_ng_per_ml(name: &str, rows: &[Vec<Cell>]) -> NgPerMlRun {
-    let xlsx = write_test_workbook(name, rows);
-    let mut validator = ExcelValidatorBuilder::new(xlsx.to_str().unwrap(), "Sheet1", text_schema())
+fn run_ng_per_ml(rows: &[Vec<Cell>]) -> NgPerMlRun {
+    let mut validator = ExcelValidatorBuilder::new(test_workbook(rows), "Sheet1", text_schema())
         .unpivot(spec())
         .build()
         .unwrap_or_else(|e| panic!("ng/mL rows must not stop the build: {e:#}"));
-    let _ = std::fs::remove_file(&xlsx);
     NgPerMlRun {
         ng_per_ml_rows: validator
             .ng_per_ml_rows()
@@ -1638,7 +1606,7 @@ fn ng_ml_rows_are_skipped_when_an_ng_l_row_holds_their_values() {
         ],
     );
 
-    let run = run_ng_per_ml("ng-ml-equivalent", &rows);
+    let run = run_ng_per_ml(&rows);
 
     let expected = vec![
         "row 3: skipped: in ng/mL; its values are in the ng/L row 2, which is imported",
@@ -1654,7 +1622,7 @@ fn ng_ml_rows_are_skipped_when_an_ng_l_row_holds_their_values() {
         run.summary
     );
 
-    let unpivoted = run_with_schema("ng-ml-equivalent-csv", &rows, spec(), text_schema()).unwrap();
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
     let expected = vec![
         "Substance,Sample Tag,Concentration,Concentration units",
         "Okadaic acid,ST01,34.79658006,ng/L",
@@ -1716,7 +1684,7 @@ fn an_ng_ml_row_without_an_equivalent_ng_l_row_stops_the_run_naming_the_closest(
         ],
     );
 
-    let run = run_ng_per_ml("ng-ml-not-equivalent", &rows);
+    let run = run_ng_per_ml(&rows);
 
     let line = "row 2: skipped: in ng/mL, but no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row 4, differs in 1 cell(s), first at row 4, column F \"Limit of quantification\": 0.25 expected, blank found";
     assert_eq!(run.ng_per_ml_rows, vec![line]);
@@ -1743,7 +1711,7 @@ fn an_ng_ml_row_in_a_sheet_without_ng_l_rows_stops_the_run() {
         ],
     );
 
-    let run = run_ng_per_ml("ng-ml-no-ng-l", &rows);
+    let run = run_ng_per_ml(&rows);
 
     let line = "row 2: skipped: in ng/mL, but the sheet has no ng/L row to hold its values";
     assert_eq!(run.ng_per_ml_rows, vec![line]);
@@ -1770,7 +1738,7 @@ fn the_identification_level_of_an_ng_ml_row_is_not_checked() {
     rows[1][1] = Number(1.0);
     rows[2][1] = Number(1.0);
 
-    let run = run_ng_per_ml("ng-ml-identification-level", &rows);
+    let run = run_ng_per_ml(&rows);
 
     let expected =
         vec!["row 2: skipped: in ng/mL; its values are in the ng/L row 3, which is imported"];

@@ -231,7 +231,7 @@ Example Excel structure:
 2. **Schema Retrieval**: Fetches the specified data dictionary from DKAN
 3. **Schema Conversion**: Converts DKAN data dictionary to JSON Schema
 4. **Validation**: Validates each Excel row against the schema
-5. **CSV Export**: Exports valid data to a timestamped CSV file
+5. **CSV Export**: Exports valid data to a timestamped CSV file, in memory
 6. **Upload**: Uploads the CSV file to DKAN's custom importer endpoint
 7. **Distribution**: Adds the uploaded CSV as a distribution to the specified dataset
 
@@ -290,7 +290,7 @@ Errors:
 ```
 
 ### CSV Output
-Valid data is exported to a timestamped CSV file with the format:
+Valid data is exported to a CSV file, built in memory and uploaded without being written locally, named:
 ```
 <sheet>_<YYYY-MM-DD_HH-MM-SS>_<dataset>.csv
 ```
