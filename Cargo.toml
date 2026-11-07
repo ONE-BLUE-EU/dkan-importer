@@ -11,8 +11,8 @@ edition = "2024"
 excel-core = { path = "crates/excel-core" }
 
 # Excel reader / writer
-calamine = "0.36"
-rust_xlsxwriter = "0.99"
+calamine = "0.38"
+rust_xlsxwriter = "0.102"
 
 serde = { version = "1.0", features = ["derive"] }
 # preserve_order: JSON built from a row keeps the sheet's column order
@@ -21,7 +21,7 @@ chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1.0"
 thiserror = "2.0"
 csv = "1.4"
-jsonschema = "0.58"
+jsonschema = "0.60"
 reqwest = { version = "0.13", features = ["json", "multipart", "blocking"] }
 log = "0.4"
 loose-dms = "0.1"
@@ -29,7 +29,7 @@ clap = { version = "4.6", features = ["derive"] }
 rpassword = "7.5"
 
 # Dev dependencies
-proptest = "1.9"
+proptest = "1.12"
 
 # Optimization profiles for maximum runtime speed
 [profile.release]
