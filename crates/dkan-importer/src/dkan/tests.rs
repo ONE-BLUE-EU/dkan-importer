@@ -417,6 +417,36 @@ fn a_dataset_that_cannot_be_read_is_an_error() {
 }
 
 #[test]
+fn the_dataset_title_is_read_from_the_dataset() {
+    let answer = response(200, r#"{"title":"Arctic","distribution":[]}"#);
+
+    assert_eq!(dataset_title("ds-1", &answer).unwrap(), "Arctic");
+}
+
+/// Read like the dataset a distribution is added to
+#[test]
+fn a_dataset_title_that_cannot_be_read_is_an_error() {
+    let cases = [
+        (
+            response(404, "no such dataset"),
+            "Failed to get dataset ds-1: no such dataset",
+        ),
+        (response(200, "<html>"), "The dataset ds-1 is not JSON"),
+        (
+            response(200, r#"{"distribution":[]}"#),
+            "Dataset title not found",
+        ),
+    ];
+    for (answer, expected) in cases {
+        let message = dataset_title("ds-1", &answer)
+            .expect_err("the dataset must be refused")
+            .to_string();
+
+        assert_eq!(message, expected);
+    }
+}
+
+#[test]
 fn a_dataset_not_saved_is_an_error_naming_it() {
     let added = DistributionAdded {
         dataset_title: "Arctic".to_string(),

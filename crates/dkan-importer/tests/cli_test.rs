@@ -324,6 +324,8 @@ fn a_failed_run_leaves_a_run_log_with_the_error_and_without_the_password() {
         .unwrap_or_else(|| panic!("unexpected run log name {name}"));
     assert_eq!(timestamp.len(), "2026-11-05_10-00-00".len(), "{name}");
     let log = std::fs::read_to_string(&log_path).unwrap();
+    let first_line = "Importing \"unused.xlsx\" into dataset some-dataset (name not read: the run stopped before reaching DKAN)";
+    assert_eq!(log.lines().next(), Some(first_line), "{log}");
     assert!(log.contains("Excel file: unused.xlsx\n"), "{log}");
     assert!(log.contains("Sheet: Analytical results (I)\n"), "{log}");
     let error_line = stderr

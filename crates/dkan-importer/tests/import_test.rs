@@ -14,6 +14,7 @@ use std::io;
 use std::rc::Rc;
 
 const BASE_URL: &str = "https://dkan.example";
+const DATASET_TITLE: &str = "Samples dataset";
 const CSV_FILE_NAME: &str = "samples_ds-1.csv";
 const FILE_URL: &str = "https://dkan.example/files/samples_ds-1.csv";
 const DICTIONARY_URL: &str =
@@ -23,6 +24,7 @@ const DICTIONARY_URL: &str =
 #[derive(Debug, Clone, PartialEq)]
 enum Call {
     CheckLogin,
+    DatasetTitle(String),
     DataDictionary(String),
     Upload {
         file_name: String,
@@ -41,6 +43,7 @@ enum Call {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Step {
     Login,
+    DatasetTitle,
     DataDictionary,
     Upload,
     AddDistribution,
@@ -72,6 +75,14 @@ impl Dkan for FakeDkan {
         self.call(Call::CheckLogin, Step::Login)
     }
 
+    fn dataset_title(&self, dataset_id: &str) -> Result<String> {
+        self.call(
+            Call::DatasetTitle(dataset_id.to_string()),
+            Step::DatasetTitle,
+        )?;
+        Ok(DATASET_TITLE.to_string())
+    }
+
     fn data_dictionary(&self, id: &str) -> Result<DataDictionary> {
         self.call(Call::DataDictionary(id.to_string()), Step::DataDictionary)?;
         let items = json!([{"identifier": "dd-1", "data": self.dictionary}]).to_string();
@@ -100,7 +111,7 @@ impl Dkan for FakeDkan {
         };
         self.call(call, Step::AddDistribution)?;
         Ok(DistributionAdded {
-            dataset_title: "Samples dataset".to_string(),
+            dataset_title: DATASET_TITLE.to_string(),
             previous_csv_filename: self.previous.map(String::from),
         })
     }
@@ -243,7 +254,13 @@ fn run_import(import: &Import, mut environment: FakeEnvironment) -> Outcome {
     }
 }
 
-/// What the run is given, at the top of every run log
+/// The first line of the run log, once DKAN gave the dataset's name
+const HEADER: &str = "Importing \"samples.xlsx\" into dataset ds-1 (\"Samples dataset\")\n";
+
+/// The first line of the run log when the run stopped before DKAN could give the dataset's name
+const HEADER_NOT_LOOKED_UP: &str = "Importing \"samples.xlsx\" into dataset ds-1 (name not read: the run stopped before reaching DKAN)\n";
+
+/// What the run is given, after the first line of every run log
 const NOTES: &str = "Excel file: samples.xlsx
 Sheet: Sheet1
 Dataset: ds-1
@@ -267,6 +284,10 @@ fn add_distribution() -> Call {
     }
 }
 
+fn dataset_title() -> Call {
+    Call::DatasetTitle("ds-1".to_string())
+}
+
 fn data_dictionary() -> Call {
     Call::DataDictionary("dd-1".to_string())
 }
@@ -278,6 +299,7 @@ fn a_valid_sheet_is_uploaded_and_added_as_a_new_distribution() {
     assert_eq!(outcome.error, None);
     let expected = vec![
         Call::CheckLogin,
+        dataset_title(),
         data_dictionary(),
         upload(),
         add_distribution(),
@@ -292,7 +314,7 @@ fn a_valid_sheet_is_uploaded_and_added_as_a_new_distribution() {
 ";
     assert_eq!(outcome.stdout, printed);
     let logged = format!(
-        "{NOTES}✅ Login accepted for user \"admin\"
+        "{HEADER}{NOTES}✅ Login accepted for user \"admin\"
 No cell changed: every cell was taken as written.
 ✅ Validation completed!
 ✅ CSV file created: samples_ds-1.csv
@@ -314,6 +336,7 @@ fn the_distribution_replaced_has_its_file_deleted_once_the_new_one_is_added() {
     assert_eq!(outcome.error, None);
     let expected = vec![
         Call::CheckLogin,
+        dataset_title(),
         data_dictionary(),
         upload(),
         add_distribution(),
@@ -341,7 +364,8 @@ fn a_url_that_is_not_https_stops_the_run_before_reading_the_file_or_connecting()
     assert_eq!(outcome.error.as_deref(), Some(expected));
     assert!(outcome.connections.is_empty());
     assert!(outcome.calls.is_empty());
-    let expected_log = NOTES.replace("https://dkan.example", "http://dkan.example");
+    let expected_log = format!("{HEADER_NOT_LOOKED_UP}{NOTES}")
+        .replace("https://dkan.example", "http://dkan.example");
     assert_eq!(outcome.log, expected_log);
 }
 
@@ -356,6 +380,7 @@ fn an_unreadable_excel_file_stops_the_run_before_asking_for_the_password() {
     assert_eq!(outcome.error.as_deref(), Some(expected));
     assert!(outcome.connections.is_empty());
     assert!(outcome.calls.is_empty());
+    assert_eq!(outcome.log, format!("{HEADER_NOT_LOOKED_UP}{NOTES}"));
 }
 
 #[test]
@@ -368,7 +393,7 @@ fn a_rejected_login_stops_the_run_before_the_data_dictionary() {
     assert_eq!(outcome.error.as_deref(), Some("DKAN refused the Login"));
     assert_eq!(outcome.calls, vec![Call::CheckLogin]);
     assert_eq!(outcome.stdout, "");
-    assert_eq!(outcome.log, NOTES);
+    assert_eq!(outcome.log, format!("{HEADER_NOT_LOOKED_UP}{NOTES}"));
 }
 
 #[test]
@@ -382,7 +407,10 @@ fn a_data_dictionary_that_cannot_be_read_stops_the_run_before_the_upload() {
         outcome.error.as_deref(),
         Some("DKAN refused the DataDictionary")
     );
-    assert_eq!(outcome.calls, vec![Call::CheckLogin, data_dictionary()]);
+    assert_eq!(
+        outcome.calls,
+        vec![Call::CheckLogin, dataset_title(), data_dictionary()]
+    );
 }
 
 fn invalid_sheet() -> Vec<u8> {
@@ -399,7 +427,10 @@ fn rows_failing_validation_go_to_the_error_log_and_nothing_is_uploaded() {
     let expected =
         "Excel validation failed with 1 error(s) across 1 row(s). Check the error log for details.";
     assert_eq!(outcome.error.as_deref(), Some(expected));
-    assert_eq!(outcome.calls, vec![Call::CheckLogin, data_dictionary()]);
+    assert_eq!(
+        outcome.calls,
+        vec![Call::CheckLogin, dataset_title(), data_dictionary()]
+    );
     let [(title, report)] = outcome.error_log.as_slice() else {
         panic!("one entry expected: {:?}", outcome.error_log);
     };
@@ -420,7 +451,10 @@ fn when_the_error_log_cannot_be_written_the_details_are_in_the_error() {
     assert!(error.starts_with(expected), "{error}");
     assert!(error.contains("Row 3: 1 error(s)\n"), "{error}");
     assert!(!error.contains("Check the error log"), "{error}");
-    assert_eq!(outcome.calls, vec![Call::CheckLogin, data_dictionary()]);
+    assert_eq!(
+        outcome.calls,
+        vec![Call::CheckLogin, dataset_title(), data_dictionary()]
+    );
 }
 
 /// An unpivoted analytical sheet's data dictionary
@@ -497,7 +531,10 @@ fn an_ng_ml_row_without_its_ng_l_row_is_in_the_run_log_and_nothing_is_uploaded()
         "{}",
         outcome.stdout
     );
-    assert_eq!(outcome.calls, vec![Call::CheckLogin, data_dictionary()]);
+    assert_eq!(
+        outcome.calls,
+        vec![Call::CheckLogin, dataset_title(), data_dictionary()]
+    );
     assert!(outcome.error_log.is_empty());
 }
 
@@ -509,7 +546,12 @@ fn a_failed_upload_stops_the_run_before_the_distribution_is_added() {
     );
 
     assert_eq!(outcome.error.as_deref(), Some("DKAN refused the Upload"));
-    let expected = vec![Call::CheckLogin, data_dictionary(), upload()];
+    let expected = vec![
+        Call::CheckLogin,
+        dataset_title(),
+        data_dictionary(),
+        upload(),
+    ];
     assert_eq!(outcome.calls, expected);
 }
 
@@ -529,6 +571,7 @@ fn a_distribution_not_added_stops_the_run_before_the_previous_file_is_deleted() 
     );
     let expected = vec![
         Call::CheckLogin,
+        dataset_title(),
         data_dictionary(),
         upload(),
         add_distribution(),
@@ -556,4 +599,36 @@ fn a_previous_file_not_deleted_stops_the_run_after_the_distribution_is_added() {
         outcome.log
     );
     assert!(!outcome.log.contains("🧹"), "{}", outcome.log);
+}
+
+/// The name is only for the run log: a dataset whose name cannot be read is still imported into,
+/// the reason taking the name's place
+#[test]
+fn a_dataset_name_that_cannot_be_read_is_explained_on_the_first_line_and_the_run_goes_on() {
+    let outcome = run_import(
+        &import(),
+        environment(valid_sheet(), dkan(None, Some(Step::DatasetTitle))),
+    );
+
+    assert_eq!(outcome.error, None);
+    let header = "Importing \"samples.xlsx\" into dataset ds-1 (name not read: DKAN refused the DatasetTitle)\n";
+    let expected = format!("{header}{NOTES}✅ Login accepted for user \"admin\"\n");
+    assert!(outcome.log.starts_with(&expected), "{}", outcome.log);
+    let expected = vec![
+        Call::CheckLogin,
+        dataset_title(),
+        data_dictionary(),
+        upload(),
+        add_distribution(),
+    ];
+    assert_eq!(outcome.calls, expected);
+}
+
+/// The first line names the dataset in every run that reached DKAN, even one stopped later
+#[test]
+fn the_first_line_names_the_dataset_in_a_run_stopped_after_reaching_dkan() {
+    let outcome = run_import(&import(), environment(invalid_sheet(), dkan(None, None)));
+
+    assert!(outcome.error.is_some());
+    assert!(outcome.log.starts_with(HEADER), "{}", outcome.log);
 }

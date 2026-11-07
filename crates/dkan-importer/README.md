@@ -228,7 +228,7 @@ Example Excel structure:
 ## Workflow
 
 1. **URL and file**: Refuses a base URL that is not https, then reads the Excel file, before asking for the password
-2. **Authentication**: Checks that DKAN accepts the login for uploads
+2. **Authentication**: Checks that DKAN accepts the login for uploads, then reads the dataset's name for the run log
 3. **Schema Retrieval**: Fetches the specified data dictionary from DKAN
 4. **Schema Conversion**: Converts DKAN data dictionary to JSON Schema
 5. **Validation**: Validates each Excel row against the schema; refused rows stop the run before anything is uploaded
@@ -250,6 +250,13 @@ Example Excel structure:
 
 ### Run Log File
 Every run writes a log in the current directory, named exactly like the run's CSV file but ending in `.run.log`: `<sheet>_<YYYY-MM-DD_HH-MM-SS>_<dataset>.run.log`, lowercase, with the sheet name's spaces as `_`, as in `analytical_results_(i)_2026-11-05_10-00-00_some-dataset.run.log`. Each run writes its own log; the newest describes the latest run. It is written even when the run stops, and never contains the password. It holds:
+- First, one line naming the Excel file and the dataset, with the dataset's name (its title in DKAN, read once the login is accepted):
+
+  ```
+  Importing "Sample_Collection&Results_Arctic 1.xlsx" into dataset ce6d5e1b-4367-4c54-a295-46b765e40a5e ("Arctic samples")
+  ```
+
+  When the name is not read, the reason takes its place: `(name not read: the run stopped before reaching DKAN)` for a run stopped by its URL, its file or the login, or DKAN's error when the dataset cannot be read. That error does not stop the run.
 - What the run was given: the Excel file, sheet, dataset, data dictionary and DKAN URL
 - Every line the run printed, including the error that stopped it
 - Every change made to a cell instead of taking it as written, one line per cell with its reason, so the data can be checked and corrected at its source:

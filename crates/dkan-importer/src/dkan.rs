@@ -102,6 +102,9 @@ pub trait Dkan {
     /// Check that DKAN accepts the login for uploads, without uploading anything
     fn check_login(&self) -> Result<()>;
 
+    /// The title of the dataset `dataset_id`
+    fn dataset_title(&self, dataset_id: &str) -> Result<String>;
+
     /// The data dictionary `id`, once its own URL, which the distribution will name, answers
     fn data_dictionary(&self, id: &str) -> Result<DataDictionary>;
 
@@ -237,6 +240,11 @@ impl Dkan for HttpDkan {
         login_checked(&self.base_url, &self.username, &response)
     }
 
+    fn dataset_title(&self, dataset_id: &str) -> Result<String> {
+        let response = self.send(self.dataset_request(Method::GET, dataset_id).build()?)?;
+        dataset_title(dataset_id, &response)
+    }
+
     fn data_dictionary(&self, id: &str) -> Result<DataDictionary> {
         let request = self.dictionaries_request()?;
         let url = request.url().to_string();
@@ -349,6 +357,29 @@ fn uploaded_file_url(response: &Response) -> Result<String> {
     Ok(uploaded.data.file_url)
 }
 
+/// The dataset `dataset_id`, read from `response`, with its title
+fn dataset(dataset_id: &str, response: &Response) -> Result<(Value, String)> {
+    let Response { status, body } = response;
+    if !status.is_success() {
+        return Err(anyhow::anyhow!(
+            "Failed to get dataset {dataset_id}: {body}"
+        ));
+    }
+    let dataset: Value = serde_json::from_str(body)
+        .with_context(|| format!("The dataset {dataset_id} is not JSON"))?;
+    let title = dataset
+        .get("title")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("Dataset title not found"))?
+        .to_string();
+    Ok((dataset, title))
+}
+
+/// The title of the dataset `dataset_id`, read from `response`
+fn dataset_title(dataset_id: &str, response: &Response) -> Result<String> {
+    dataset(dataset_id, response).map(|(_, title)| title)
+}
+
 /// The dataset `dataset_id`, read from `response`, with `new` in place of the CSV distribution
 /// its data dictionary describes, if any; and what that adds
 fn dataset_with_distribution(
@@ -356,19 +387,7 @@ fn dataset_with_distribution(
     response: &Response,
     new: NewDistribution<'_>,
 ) -> Result<(Value, DistributionAdded)> {
-    let Response { status, body } = response;
-    if !status.is_success() {
-        return Err(anyhow::anyhow!(
-            "Failed to get dataset {dataset_id}: {body}"
-        ));
-    }
-    let mut dataset: Value = serde_json::from_str(body)
-        .with_context(|| format!("The dataset {dataset_id} is not JSON"))?;
-    let dataset_title = dataset
-        .get("title")
-        .and_then(Value::as_str)
-        .ok_or_else(|| anyhow::anyhow!("Dataset title not found"))?
-        .to_string();
+    let (mut dataset, dataset_title) = dataset(dataset_id, response)?;
 
     let mut previous_csv_filename = None;
     let mut distributions = Vec::new();
