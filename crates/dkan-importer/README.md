@@ -250,14 +250,18 @@ Example Excel structure:
 
 ### Run Log File
 Every run writes a log in the current directory, named exactly like the run's CSV file but ending in `.run.log`: `<sheet>_<YYYY-MM-DD_HH-MM-SS>_<dataset>.run.log`, lowercase, with the sheet name's spaces as `_`, as in `analytical_results_(i)_2026-11-05_10-00-00_some-dataset.run.log`. Each run writes its own log; the newest describes the latest run. It is written even when the run stops, and never contains the password. It holds:
-- First, one line naming the Excel file and the dataset, with the dataset's name (its title in DKAN, read once the login is accepted):
+- First, what the run was given, with the dataset's and the data dictionary's names (their titles in DKAN, read once the login is accepted), then two blank lines:
 
   ```
-  Importing "Sample_Collection&Results_Arctic 1.xlsx" into dataset ce6d5e1b-4367-4c54-a295-46b765e40a5e ("Arctic samples")
+  Excel file: Sample_Collection&Results_Arctic 1.xlsx
+  Excel sheet: Analytical results (I)
+  Dataset Name: Arctic Ocean - Arctic Ocean - 2023
+  Dataset ID: 9e94380f-73d5-4655-9a0f-519adbff655c
+  Dictionary Name: <the data dictionary's title>
+  Dictionary ID: 6bc71c4e-a63b-436b-98c1-b74363fb482e
   ```
 
-  When the name is not read, the reason takes its place: `(name not read: the run stopped before reaching DKAN)` for a run stopped by its URL, its file or the login, or DKAN's error when the dataset cannot be read. That error does not stop the run.
-- What the run was given: the Excel file, sheet, dataset, data dictionary and DKAN URL
+  When a name is not read, the reason takes its place: `(not read: the run stopped before reaching DKAN)` for a run stopped by its URL, its file or the login, or DKAN's error. A dataset whose name cannot be read does not stop the run; a data dictionary that cannot be read does, once the top of the log is written.
 - Every line the run printed, including the error that stopped it
 - Every change made to a cell instead of taking it as written, one line per cell with its reason, so the data can be checked and corrected at its source:
 

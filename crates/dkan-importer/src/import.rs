@@ -45,37 +45,53 @@ pub trait Environment {
     fn append_error_log(&mut self, title: &str, details: &str) -> io::Result<()>;
 }
 
-/// Why the first line of a run stopped before reaching DKAN has no dataset name
+/// In place of a name the run stopped before reaching DKAN for
 const DKAN_NOT_REACHED: &str = "the run stopped before reaching DKAN";
 
-/// The dataset's name, for the first line of the run log
-enum DatasetName {
+/// A name read from DKAN for the top of the run log
+enum Name {
     Read(String),
     /// Why not
     NotRead(String),
 }
 
-/// The first line of the run log: the file, and the dataset with its name. One line, whatever
-/// the reason the name was not read.
-fn first_line(import: &Import, name: &DatasetName) -> String {
-    let name = match name {
-        DatasetName::Read(title) => format!("\"{title}\""),
-        DatasetName::NotRead(why) => format!(
-            "name not read: {}",
-            why.split_whitespace().collect::<Vec<_>>().join(" ")
-        ),
-    };
-    format!(
-        "Importing \"{}\" into dataset {} ({name})",
-        import.excel_file, import.dataset_id
-    )
+impl std::fmt::Display for Name {
+    /// One line, whatever the reason the name was not read
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Name::Read(name) => f.write_str(name),
+            Name::NotRead(why) => write!(
+                f,
+                "(not read: {})",
+                why.split_whitespace().collect::<Vec<_>>().join(" ")
+            ),
+        }
+    }
 }
 
-/// The steps before the first line of the run log can name the dataset; they log nothing
+/// The top of the run log: the file and sheet, then the dataset and the data dictionary, each with
+/// its name, then two blank lines
+fn header(import: &Import, dataset_name: &Name, dictionary_name: &Name) -> [String; 8] {
+    [
+        format!("Excel file: {}", import.excel_file),
+        format!("Excel sheet: {}", import.sheet_name),
+        format!("Dataset Name: {dataset_name}"),
+        format!("Dataset ID: {}", import.dataset_id),
+        format!("Dictionary Name: {dictionary_name}"),
+        format!("Dictionary ID: {}", import.data_dictionary_id),
+        String::new(),
+        String::new(),
+    ]
+}
+
+/// The steps before the top of the run log can name the dataset and the data dictionary; they
+/// log nothing
 struct Reached<D> {
     dkan: D,
     workbook: Vec<u8>,
-    dataset_name: DatasetName,
+    dataset_name: Name,
+    /// Needed to validate the rows, so stopping the run once the top of the log is written
+    data_dictionary: Result<DataDictionary>,
 }
 
 fn reach_dkan<E: Environment>(
@@ -94,13 +110,15 @@ fn reach_dkan<E: Environment>(
     dkan.check_login()?;
     // Only for the run log: a dataset that cannot be read stops the run when it is added to
     let dataset_name = match dkan.dataset_title(&import.dataset_id) {
-        Ok(title) => DatasetName::Read(title),
-        Err(e) => DatasetName::NotRead(e.to_string()),
+        Ok(title) => Name::Read(title),
+        Err(e) => Name::NotRead(e.to_string()),
     };
+    let data_dictionary = dkan.data_dictionary(&import.data_dictionary_id);
     Ok(Reached {
         dkan,
         workbook,
         dataset_name,
+        data_dictionary,
     })
 }
 
@@ -112,23 +130,30 @@ pub fn run<E: Environment, L: Write, O: Write, R: Write>(
     log: &mut RunLog<L, O, R>,
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
     let reached = reach_dkan(import, environment);
-    let not_reached = DatasetName::NotRead(DKAN_NOT_REACHED.to_string());
-    let dataset_name = reached
-        .as_ref()
-        .map_or(&not_reached, |reached| &reached.dataset_name);
-    log.note(&first_line(import, dataset_name))?;
-    log.note(&format!("Excel file: {}", import.excel_file))?;
-    log.note(&format!("Sheet: {}", import.sheet_name))?;
-    log.note(&format!("Dataset: {}", import.dataset_id))?;
-    log.note(&format!("Data dictionary: {}", import.data_dictionary_id))?;
-    log.note(&format!("DKAN: {}", import.base_url))?;
+    let not_reached = || Name::NotRead(DKAN_NOT_REACHED.to_string());
+    let (dataset_name, dictionary_name) = match &reached {
+        Ok(reached) => (
+            &reached.dataset_name,
+            match &reached.data_dictionary {
+                Ok(dictionary) => Name::Read(dictionary.name.clone()),
+                Err(e) => Name::NotRead(e.to_string()),
+            },
+        ),
+        Err(_) => (&not_reached(), not_reached()),
+    };
+    log.notes(&header(import, dataset_name, &dictionary_name))?;
 
-    let Reached { dkan, workbook, .. } = reached?;
+    let Reached {
+        dkan,
+        workbook,
+        data_dictionary,
+        ..
+    } = reached?;
     log.info(&format!(
         "✅ Login accepted for user \"{}\"",
         import.username
     ))?;
-    let data_dictionary = dkan.data_dictionary(&import.data_dictionary_id)?;
+    let data_dictionary = data_dictionary?;
     let json_schema = data_dictionary.to_json_schema()?;
     let title_to_name_mapping =
         DataDictionary::create_title_to_name_mapping(&data_dictionary.fields)?;
@@ -221,28 +246,15 @@ pub fn run<E: Environment, L: Write, O: Write, R: Write>(
 mod tests {
     use super::*;
 
-    fn import() -> Import {
-        Import {
-            excel_file: "samples.xlsx".to_string(),
-            sheet_name: "Sheet1".to_string(),
-            data_dictionary_id: "dd-1".to_string(),
-            dataset_id: "ds-1".to_string(),
-            base_url: "https://dkan.example".to_string(),
-            username: "admin".to_string(),
-            csv_file_name: "samples.csv".to_string(),
-            unpivot: None,
-            extra_columns_to: None,
-        }
-    }
-
-    /// A reason such as an HTML error page keeps the first line one line
+    /// A reason such as an HTML error page keeps the name one line
     #[test]
-    fn the_first_line_stays_one_line_whatever_the_reason_the_name_was_not_read() {
-        let name = DatasetName::NotRead(
+    fn a_name_not_read_stays_one_line_whatever_the_reason() {
+        let name = Name::NotRead(
             "Failed to get dataset ds-1: <html>\n  <body>Not found</body>\n</html>".to_string(),
         );
 
-        let expected = "Importing \"samples.xlsx\" into dataset ds-1 (name not read: Failed to get dataset ds-1: <html> <body>Not found</body> </html>)";
-        assert_eq!(first_line(&import(), &name), expected);
+        let expected =
+            "(not read: Failed to get dataset ds-1: <html> <body>Not found</body> </html>)";
+        assert_eq!(name.to_string(), expected);
     }
 }
