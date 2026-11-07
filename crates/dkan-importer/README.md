@@ -84,12 +84,13 @@ Okadaic acid   | ST02_Surface | 0.40
 
 - The leading columns whose headers are data dictionary fields are copied to every row. Every column after them is a sample column.
 - A blank sample cell is no result, so it gives no row. Cells with only spaces, and formulas that give `""`, count as blank.
-- Analytical results are always identification level `2A`. The sheet must have an "Identification Level" column before the sample columns, and the data dictionary that field; otherwise the run stops before reading any rows. Every row with results must hold `2A` (spaces around it are ignored). The importer does not rewrite other values: they stop the run before anything is written or uploaded, listing each row to correct in the source file:
+- Analytical results are always identification level 2. The sheet must have an "Identification Level" column before the sample columns, and the data dictionary that field; otherwise the run stops before reading any rows. Every row with results must hold the number `2`: a number cell, not text, even text reading `2`, which Excel shows the same. The importer does not rewrite other values: they stop the run before anything is written or uploaded, listing each row to correct in the source file, with text in quotes:
 
   ```
-  The sheet "Analytical results" has 2 row(s) whose Identification Level is not 2A. Analytical results are always identification level 2A: correct these cells in the source file and try again:
+  The sheet "Analytical results" has 3 row(s) whose Identification Level is not the number 2. Analytical results are always identification level 2: correct these cells in the source file and try again:
     row 2: 1
     row 3: blank
+    row 4: "2A"
   ```
 - `--headers-column` and `--values-column` are only accepted with `--unpivot`, and `--unpivot` needs `--headers-column`. Both must be data dictionary fields that are not columns in the sheet. Otherwise the run stops and lists the fields that can be used.
 - The run also stops, before anything is written or uploaded, if the sheet does not start with data dictionary fields, has no sample columns, or has a data dictionary field among the sample columns.
@@ -272,7 +273,7 @@ Blank sample cells are not listed, as a sheet has thousands: the summary line co
 
 Rows that fail validation are not changes: they are listed in `errors.log`.
 
-Problems that must be corrected in the source file (an Identification Level that is not `2A`, an ng/mL row whose values no ng/L row holds, data in a column without a header) stop the run only once every row has been read. So one run reports all of them together, after the summary, the changes and the questions, and nothing is written or uploaded.
+Problems that must be corrected in the source file (an Identification Level that is not the number `2`, an ng/mL row whose values no ng/L row holds, data in a column without a header) stop the run only once every row has been read. So one run reports all of them together, after the summary, the changes and the questions, and nothing is written or uploaded.
 
 ### Error Log File
 When rows fail validation, the run appends an entry to `errors.log`, in the directory it runs in, containing:

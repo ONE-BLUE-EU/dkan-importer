@@ -501,7 +501,7 @@ fn an_ng_ml_row_without_its_ng_l_row_is_in_the_run_log_and_nothing_is_uploaded()
         ],
         vec![
             Text("Okadaic acid"),
-            Text("2A"),
+            Number(2.0),
             Empty,
             Text("ng/mL"),
             Number(0.0001),

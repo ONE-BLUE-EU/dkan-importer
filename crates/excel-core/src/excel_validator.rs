@@ -855,9 +855,18 @@ const NO_SAMPLE_ALIAS: &str = "ND";
 /// it among its kept columns, holding [`IDENTIFICATION_LEVEL`] in every row with a result.
 pub const IDENTIFICATION_LEVEL_FIELD: &str = "Identification Level";
 
-/// The identification level of every analytical result. Other values are not rewritten: they
-/// stop the run, to be corrected in the source file.
-pub const IDENTIFICATION_LEVEL: &str = "2A";
+/// The identification level of every analytical result, a number cell. Other values, text
+/// reading 2 included, are not rewritten: they stop the run, to be corrected in the source file.
+pub const IDENTIFICATION_LEVEL: u8 = 2;
+
+/// Whether `cell` is the number [`IDENTIFICATION_LEVEL`]
+fn is_identification_level(cell: &Data) -> bool {
+    match cell {
+        Data::Int(n) => *n == i64::from(IDENTIFICATION_LEVEL),
+        Data::Float(n) => *n == f64::from(IDENTIFICATION_LEVEL),
+        _ => false,
+    }
+}
 
 /// Markers some sheets use for a meaning that already has a marker, and the marker to write
 /// instead, so that one meaning is written one way across datasets. They are refused, even
@@ -1700,12 +1709,16 @@ impl ExcelValidator {
                 .any(|(col_idx, _)| row.get(*col_idx).is_some_and(|cell| !is_no_result(cell)));
             match row.get(samples.identification_level) {
                 _ if !has_results => {}
-                Some(Data::String(level)) if level.trim() == IDENTIFICATION_LEVEL => {}
+                Some(cell) if is_identification_level(cell) => {}
+                // Text in quotes, as text reading 2 looks like the number in Excel
                 cell => wrong_identification_levels.push(format!(
                     "row {}: {}",
                     row_number,
-                    cell.filter(|cell| !is_blank(cell))
-                        .map_or_else(|| "blank".to_string(), ToString::to_string)
+                    match cell.filter(|cell| !is_blank(cell)) {
+                        None => "blank".to_string(),
+                        Some(Data::String(text)) => format!("\"{}\"", text.trim()),
+                        Some(cell) => cell.to_string(),
+                    }
                 )),
             }
             let units = Units::parse(row.get(samples.units));
@@ -1862,7 +1875,7 @@ impl ExcelValidator {
 
         if !wrong_identification_levels.is_empty() {
             problems.push(format!(
-                "The sheet \"{}\" has {} row(s) whose {} is not {}. Analytical results are always identification level {}: correct these cells in the source file and try again:\n  {}",
+                "The sheet \"{}\" has {} row(s) whose {} is not the number {}. Analytical results are always identification level {}: correct these cells in the source file and try again:\n  {}",
                 self.sheet_name,
                 wrong_identification_levels.len(),
                 IDENTIFICATION_LEVEL_FIELD,

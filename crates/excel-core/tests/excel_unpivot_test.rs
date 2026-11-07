@@ -173,7 +173,7 @@ fn wide_sheet() -> Vec<Vec<Cell>> {
         ],
         vec![
             Text("Okadaic acid"),
-            Text("2A"),
+            Number(2.0),
             Text("ng/L"),
             Number(0.01),
             Number(0.02),
@@ -183,7 +183,7 @@ fn wide_sheet() -> Vec<Vec<Cell>> {
         vec![],
         vec![
             Text("Azaspiracid-2"),
-            Text("2A"),
+            Number(2.0),
             Text("ng/L"),
             Number(0.01),
             Number(0.02),
@@ -221,7 +221,7 @@ fn blank_sample_cells_in_every_form_produce_no_row() {
     let mut rows = marker_sheet([Empty, Text("  "), FormulaText("")]);
     rows.push(vec![
         Text("Azaspiracid-2"),
-        Text("2A"),
+        Number(2.0),
         Text("ng/L"),
         Number(0.01),
         Number(0.02),
@@ -265,7 +265,7 @@ fn text_in_the_values_column_is_a_validation_error_at_its_source_row() {
         ],
         vec![
             Text("Okadaic acid"),
-            Text("2A"),
+            Number(2.0),
             Text("ng/L"),
             Number(0.01),
             Number(0.02),
@@ -274,7 +274,7 @@ fn text_in_the_values_column_is_a_validation_error_at_its_source_row() {
         ],
         vec![
             Text("Azaspiracid-2"),
-            Text("2A"),
+            Number(2.0),
             Text("ng/L"),
             Number(0.01),
             Number(0.02),
@@ -366,7 +366,7 @@ fn a_sheet_without_sample_columns_is_refused() {
         ],
         vec![
             Text("Okadaic acid"),
-            Text("2A"),
+            Number(2.0),
             Text("ng/L"),
             Number(0.01),
             Number(0.02),
@@ -393,7 +393,7 @@ fn a_dictionary_field_among_the_sample_columns_is_refused() {
         ],
         vec![
             Text("Okadaic acid"),
-            Text("2A"),
+            Number(2.0),
             Number(0.88),
             Text("ng/L"),
             Number(0.01),
@@ -422,7 +422,7 @@ fn a_sample_column_without_a_header_is_refused() {
         ],
         vec![
             Text("Okadaic acid"),
-            Text("2A"),
+            Number(2.0),
             Text("ng/L"),
             Number(0.01),
             Number(0.02),
@@ -455,7 +455,7 @@ fn excel_error_cells_are_emptied_so_a_sample_error_gives_no_row() {
         ],
         vec![
             Text("Okadaic acid"),
-            Text("2A"),
+            Number(2.0),
             Error("#N/A"),
             Text("ng/L"),
             Number(0.01),
@@ -501,7 +501,7 @@ fn marker_sheet(cells: [Cell; 3]) -> Vec<Vec<Cell>> {
         ],
         vec![
             Text("Okadaic acid"),
-            Text("2A"),
+            Number(2.0),
             Text("ng/L"),
             Number(0.01),
             Number(0.02),
@@ -517,7 +517,7 @@ fn a_text_values_field_takes_numbers_and_markers_as_written() {
     let mut rows = marker_sheet([Number(0.880999866251062), Text("<LOQ "), Text("<LOD")]);
     rows.push(vec![
         Text("Azaspiracid-2"),
-        Text("2A"),
+        Number(2.0),
         Text("ng/L"),
         Number(0.01),
         Number(0.02),
@@ -592,7 +592,7 @@ fn limits_sheet(loq: Cell, cells: [Cell; 3]) -> Vec<Vec<Cell>> {
         ],
         vec![
             Text("Okadaic acid"),
-            Text("2A"),
+            Number(2.0),
             Text("ng/L"),
             Number(0.1),
             loq,
@@ -777,7 +777,7 @@ fn nd_cells_are_treated_as_ns_and_give_no_row() {
     let mut rows = marker_sheet([Text("ND"), Text(" nd "), Text("NS")]);
     rows.push(vec![
         Text("Azaspiracid-2"),
-        Text("2A"),
+        Number(2.0),
         Text("ng/L"),
         Number(0.01),
         Number(0.02),
@@ -886,7 +886,7 @@ fn markers_match_ignoring_case_and_are_written_uppercase() {
     let mut rows = marker_sheet([Text("<loq"), Text(" <LoQ "), Text("<lod")]);
     rows.push(vec![
         Text("Azaspiracid-2"),
-        Text("2A"),
+        Number(2.0),
         Text("ng/L"),
         Number(0.01),
         Number(0.02),
@@ -1024,8 +1024,8 @@ fn a_sheet_without_the_identification_level_column_is_refused() {
 }
 
 #[test]
-fn an_identification_level_of_2a_is_kept_as_written() {
-    let rows = levels_sheet(vec![Text(IDENTIFICATION_LEVEL), Text(" 2A ")]);
+fn an_identification_level_of_the_number_2_is_kept_as_written() {
+    let rows = levels_sheet(vec![Number(IDENTIFICATION_LEVEL.into()), Number(2.0)]);
 
     let unpivoted = run(&rows, spec()).unwrap();
 
@@ -1037,35 +1037,41 @@ fn an_identification_level_of_2a_is_kept_as_written() {
     ];
     let expected = vec![
         "Substance,Identification Level,Sample Tag,Concentration",
-        "Okadaic acid,2A,ST01,0.88",
-        "Okadaic acid,2A,ST01,0.88",
+        "Okadaic acid,2,ST01,0.88",
+        "Okadaic acid,2,ST01,0.88",
     ];
     assert_eq!(unpivoted.columns(&columns), expected);
 }
 
+/// Only the number 2: not text, even text reading 2, which Excel shows the same, and not 2A, the
+/// level the sheets used to hold
 #[test]
-fn rows_whose_identification_level_is_not_2a_stop_the_run_listing_each() {
+fn rows_whose_identification_level_is_not_the_number_2_stop_the_run_listing_each() {
     let mut rows = levels_sheet(vec![
         Number(1.0),
         Empty,
-        Text("2a"),
-        Text(IDENTIFICATION_LEVEL),
+        Text("2"),
+        Text("2A"),
+        Number(2.5),
+        Number(2.0),
     ]);
     // A row without results gives no rows, so its identification level does not matter
-    rows.push(level_row(Number(2.0), Empty));
-    rows.push(level_row(Number(2.0), Text("NS")));
+    rows.push(level_row(Text("2A"), Empty));
+    rows.push(level_row(Text("2A"), Text("NS")));
 
     let err = run(&rows, spec()).unwrap_err();
 
-    let expected = "The sheet \"Sheet1\" has 3 row(s) whose Identification Level is not 2A. \
-Analytical results are always identification level 2A: correct these cells in the source file and try again:
+    let expected = "The sheet \"Sheet1\" has 5 row(s) whose Identification Level is not the number 2. \
+Analytical results are always identification level 2: correct these cells in the source file and try again:
   row 2: 1
   row 3: blank
-  row 4: 2a";
+  row 4: \"2\"
+  row 5: \"2A\"
+  row 6: 2.5";
     assert!(err.contains(expected), "{err}");
-    assert!(!err.contains("row 5"), "{err}");
-    assert!(!err.contains("row 6"), "{err}");
-    assert!(!err.contains("row 7"), "{err}");
+    for row in ["row 7", "row 8", "row 9"] {
+        assert!(!err.contains(row), "{err}");
+    }
 }
 
 /// NS means no sample was taken, so there is no result to import.
@@ -1125,7 +1131,7 @@ fn every_change_to_a_sample_cell_is_listed_with_its_reason() {
     let mut rows = limits_sheet(Number(0.25), [Text("<loq:0.25"), Text(" ns "), Empty]);
     rows.push(vec![
         Text("Azaspiracid-2"),
-        Text("2A"),
+        Number(2.0),
         Text("ng/L"),
         Number(0.1),
         Number(0.25),
@@ -1170,7 +1176,7 @@ fn analytical_sheet(tags: &[&'static str], rows: Vec<Vec<Cell>>) -> Vec<Vec<Cell
     header.extend(tags.iter().map(|tag| Text(tag)));
     let mut sheet = vec![header];
     sheet.extend(rows.into_iter().map(|row| {
-        let mut cells = vec![Text("Okadaic acid"), Text("2A")];
+        let mut cells = vec![Text("Okadaic acid"), Number(2.0)];
         cells.extend(row);
         cells
     }));
@@ -1456,7 +1462,7 @@ fn a_sheet_without_the_concentration_units_column_is_refused() {
         ],
         vec![
             Text("Okadaic acid"),
-            Text("2A"),
+            Number(2.0),
             Number(0.1),
             Number(0.25),
             Number(0.3),
@@ -1488,7 +1494,7 @@ fn every_problem_is_reported_in_one_run_with_the_changes_and_questions() {
             vec![Empty, Text("items"), Empty, Empty, Number(1.5), Number(2.0)],
         ],
     );
-    // Row 4's identification level is not 2A
+    // Row 4's identification level is not 2
     rows[3][1] = Number(1.0);
     let mut validator = ExcelValidatorBuilder::new(test_workbook(&rows), "Sheet1", text_schema())
         .unpivot(spec())
@@ -1516,7 +1522,7 @@ fn every_problem_is_reported_in_one_run_with_the_changes_and_questions() {
     assert_eq!(changes, expected);
     // X in ng/L, the 1.5 items, and "detected, not quantified" for row 2's 0.2
     assert_eq!(questions.len(), 3, "{questions:?}");
-    let expected = "The sheet \"Sheet1\" has 1 row(s) whose Identification Level is not 2A. Analytical results are always identification level 2A: correct these cells in the source file and try again:
+    let expected = "The sheet \"Sheet1\" has 1 row(s) whose Identification Level is not the number 2. Analytical results are always identification level 2: correct these cells in the source file and try again:
   row 4: 1";
     assert!(err.contains(expected), "{err}");
     assert!(
@@ -1747,7 +1753,7 @@ fn the_identification_level_of_an_ng_ml_row_is_not_checked() {
         .error
         .expect("row 3's identification level must stop the run");
     assert!(
-        error.contains("has 1 row(s) whose Identification Level is not 2A"),
+        error.contains("has 1 row(s) whose Identification Level is not the number 2"),
         "{error}"
     );
     assert!(error.contains("\n  row 3: 1"), "{error}");
