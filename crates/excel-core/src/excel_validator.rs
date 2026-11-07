@@ -4,6 +4,7 @@ use jsonschema::Validator;
 use serde_json::{Map, Value, json};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
+use std::num::NonZeroUsize;
 use thiserror::Error;
 
 use crate::utils::{normalize_string, write_error_to_log};
@@ -231,8 +232,184 @@ impl std::fmt::Display for Question {
 }
 
 /// Units some sheets keep beside their ng/L rows, which are calculated from them by formulas.
-/// They stop the run, to be removed from the source file. Matched ignoring case.
+/// Such a row is skipped, its values being in its ng/L row. Matched ignoring case.
 const NANOGRAMS_PER_MILLILITRE: &str = "ng/mL";
+
+/// An ng/mL value is this many times the same ng/L value
+const MILLILITRES_PER_LITRE: f64 = 1000.0;
+
+/// How far apart, relative to the larger, an ng/L number may be from its ng/mL number x1000.
+/// Excel saves a formula's result to 15 significant digits, but sheets also hold them rounded to
+/// 10, as in `34.79658006` for `0.03479658005914394` ng/mL.
+const SAME_NUMBER_RELATIVE_TOLERANCE: f64 = 1e-6;
+
+/// An ng/mL row of an unpivoted sheet. Only ng/L is imported, so it is skipped, but its values
+/// must be in an ng/L row: sheets keep ng/mL rows beside the ng/L rows calculated from them by
+/// formulas, and a formula pointing at the wrong row would lose them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NgPerMlRow {
+    pub counterpart: Counterpart,
+    /// The row number Excel shows
+    pub row: usize,
+}
+
+/// The ng/L row holding an ng/mL row's values: its text, ignoring case and spaces, and its
+/// numbers x1000 in the limits and the sample columns. Where the ng/mL row is blank, or holds an
+/// Excel error, the ng/L row may hold anything.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Counterpart {
+    /// The row number Excel shows of the first ng/L row holding them
+    Found(usize),
+    /// No ng/L row holds them, which stops the run: the closest, unless the sheet has no ng/L row
+    Missing(Option<Closest>),
+}
+
+/// The ng/L row differing from an ng/mL row in the fewest cells, the first of them if several do
+#[derive(Debug, Clone, PartialEq)]
+pub struct Closest {
+    /// Its first difference, in sheet order, whose cell is in the ng/L row
+    pub first: Difference,
+    /// The number of cells in which it differs
+    pub differences: NonZeroUsize,
+}
+
+/// A cell of an ng/L row not holding the value of its ng/mL row
+#[derive(Debug, Clone, PartialEq)]
+pub struct Difference {
+    pub cell: SheetCell,
+    /// The ng/mL value, as it should be in ng/L: a number, or text in quotes
+    pub expected: String,
+    /// The cell: a number, text in quotes, or `blank`
+    pub found: String,
+}
+
+impl std::fmt::Display for NgPerMlRow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "row {}: skipped: in {NANOGRAMS_PER_MILLILITRE}",
+            self.row
+        )?;
+        match &self.counterpart {
+            Counterpart::Found(row) => {
+                write!(
+                    f,
+                    "; its values are in the ng/L row {row}, which is imported"
+                )
+            }
+            Counterpart::Missing(None) => {
+                write!(f, ", but the sheet has no ng/L row to hold its values")
+            }
+            Counterpart::Missing(Some(Closest { first, differences })) => write!(
+                f,
+                ", but no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row {}, differs in {differences} cell(s), first at {}: {} expected, {} found",
+                first.cell.row, first.cell, first.expected, first.found
+            ),
+        }
+    }
+}
+
+/// A column whose value in an ng/mL row must be in its ng/L row
+struct ComparedColumn {
+    /// The column letters Excel shows
+    column: String,
+    header: Option<String>,
+    index: usize,
+    /// What the ng/mL number is multiplied by in ng/L: [`MILLILITRES_PER_LITRE`] or 1
+    factor: f64,
+}
+
+/// A cell's number, whether it holds a number or text holding one
+fn cell_number(cell: &Data) -> Option<f64> {
+    match cell {
+        Data::Float(n) => Some(*n),
+        Data::Int(n) => Some(*n as f64),
+        Data::String(s) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+    .filter(|n| n.is_finite())
+}
+
+/// `cell` as the run log shows it: a number, text in quotes, or `blank`
+fn describe(cell: Option<&Data>) -> String {
+    match cell.filter(|cell| !is_blank(cell)) {
+        None => "blank".to_string(),
+        Some(cell) => match cell_number(cell) {
+            Some(n) => n.to_string(),
+            None => format!("\"{}\"", cell.to_string().trim()),
+        },
+    }
+}
+
+/// What the ng/L cell should hold and what it holds, unless it holds the ng/mL cell's value
+/// multiplied by `factor`
+fn difference(
+    ng_per_ml: Option<&Data>,
+    ng_per_l: Option<&Data>,
+    factor: f64,
+) -> Option<(String, String)> {
+    let ng_per_ml = ng_per_ml.filter(|cell| !is_blank(cell) && !matches!(cell, Data::Error(_)))?;
+    let (expected, holds) = match cell_number(ng_per_ml) {
+        Some(n) => {
+            let expected = n * factor;
+            let holds = ng_per_l.and_then(cell_number).is_some_and(|found| {
+                (found - expected).abs()
+                    <= SAME_NUMBER_RELATIVE_TOLERANCE * found.abs().max(expected.abs())
+            });
+            (expected.to_string(), holds)
+        }
+        None => {
+            let text = ng_per_ml.to_string();
+            let text = text.trim();
+            let holds =
+                ng_per_l.is_some_and(|cell| cell.to_string().trim().eq_ignore_ascii_case(text));
+            (format!("\"{text}\""), holds)
+        }
+    };
+    (!holds).then(|| (expected, describe(ng_per_l)))
+}
+
+/// The ng/L row of `ng_per_litre` (row number, cells) holding the values of the ng/mL row
+/// `ng_per_ml` in `columns`
+fn counterpart(
+    ng_per_ml: &[Data],
+    ng_per_litre: &[(usize, &[Data])],
+    columns: &[ComparedColumn],
+) -> Counterpart {
+    let mut closest: Option<Closest> = None;
+    for (row, ng_per_l) in ng_per_litre {
+        let mut differences = columns.iter().filter_map(|column| {
+            difference(
+                ng_per_ml.get(column.index),
+                ng_per_l.get(column.index),
+                column.factor,
+            )
+            .map(|difference| (column, difference))
+        });
+        let Some((column, (expected, found))) = differences.next() else {
+            return Counterpart::Found(*row);
+        };
+        let count = NonZeroUsize::MIN.saturating_add(differences.count());
+        if closest
+            .as_ref()
+            .is_none_or(|closest| count < closest.differences)
+        {
+            closest = Some(Closest {
+                first: Difference {
+                    cell: SheetCell {
+                        row: *row,
+                        column: column.column.clone(),
+                        header: column.header.clone(),
+                    },
+                    expected,
+                    found,
+                },
+                differences: count,
+            });
+        }
+    }
+    Counterpart::Missing(closest)
+}
 
 /// A row's units, read from its [`UNITS_FIELD`] cell, ignoring case and surrounding spaces
 #[derive(Debug, PartialEq)]
@@ -257,6 +434,10 @@ impl Units {
             "items" => Units::Items,
             _ => Units::Other(text.to_string()),
         }
+    }
+
+    fn is_ng_per_ml(&self) -> bool {
+        matches!(self, Units::Other(units) if units.eq_ignore_ascii_case(NANOGRAMS_PER_MILLILITRE))
     }
 }
 
@@ -418,6 +599,8 @@ struct ProcessedSheet {
     changes: Vec<Change>,
     /// The open questions, each with the number of cells concerned
     questions: Vec<(Question, usize)>,
+    /// The ng/mL rows skipped, in sheet order, each with its ng/L row
+    ng_per_ml_rows: Vec<NgPerMlRow>,
     /// What stops the run until the source is corrected, each a message listing its cells
     problems: Vec<String>,
     /// The markers allowed in the values field, when an unpivot sends its cells to a text field
@@ -530,6 +713,7 @@ pub struct ExcelValidator {
     error_cells_summary: Option<String>,
     changes: Vec<Change>,
     questions: Vec<(Question, usize)>,
+    ng_per_ml_rows: Vec<NgPerMlRow>,
     problems: Vec<String>,
     values_markers: Option<ValuesMarkers>,
 }
@@ -835,6 +1019,7 @@ impl ExcelValidatorBuilder {
             error_cells_summary: None,
             changes: Vec::new(),
             questions: Vec::new(),
+            ng_per_ml_rows: Vec::new(),
             problems: Vec::new(),
             values_markers: None,
         };
@@ -856,6 +1041,7 @@ impl ExcelValidatorBuilder {
             error_cells_summary: sheet.error_cells_summary,
             changes: sheet.changes,
             questions: sheet.questions,
+            ng_per_ml_rows: sheet.ng_per_ml_rows,
             problems: sheet.problems,
             values_markers: sheet.values_markers,
         })
@@ -889,6 +1075,7 @@ impl ExcelValidator {
             error_cells_summary: None,
             changes: Vec::new(),
             questions: Vec::new(),
+            ng_per_ml_rows: Vec::new(),
             problems: Vec::new(),
             values_markers: None,
         })
@@ -923,6 +1110,12 @@ impl ExcelValidator {
     /// order
     pub fn questions(&self) -> &[(Question, usize)] {
         &self.questions
+    }
+
+    /// The ng/mL rows of an unpivoted sheet, in sheet order. Each is skipped, and says which ng/L
+    /// row holds its values, or the closest one when none does, which stops the run.
+    pub fn ng_per_ml_rows(&self) -> &[NgPerMlRow] {
+        &self.ng_per_ml_rows
     }
 
     /// Get the headers from the Excel file
@@ -1315,8 +1508,8 @@ impl ExcelValidator {
         let mut no_sample_cells: usize = 0;
         // Rows with results whose identification level is not IDENTIFICATION_LEVEL
         let mut wrong_identification_levels: Vec<String> = Vec::new();
-        // Rows in ng/mL, which stop the run until they are removed from the source
-        let mut ng_per_ml_rows: Vec<String> = Vec::new();
+        // Rows in ng/mL, skipped here and matched with their ng/L rows once every row is read
+        let mut ng_per_ml_count: usize = 0;
         // The open questions, each with the number of cells concerned
         let mut questions: BTreeMap<Question, usize> = BTreeMap::new();
         let mut parsed_rows: Vec<ParsedExcelRow> = Vec::new();
@@ -1383,11 +1576,16 @@ impl ExcelValidator {
                 continue;
             }
 
-            // The row number Excel shows
-            let row_number = usize::try_from(first_row)
-                .unwrap_or(usize::MAX)
-                .saturating_add(row_index)
-                .saturating_add(1);
+            let row_number = sheet_row(first_row, row_index);
+
+            // Before anything else, as nothing of an ng/mL row is imported: not even its Excel
+            // error cells are listed as emptied
+            if let Some(samples) = &samples
+                && Units::parse(row.get(samples.units)).is_ng_per_ml()
+            {
+                ng_per_ml_count = ng_per_ml_count.saturating_add(1);
+                continue;
+            }
 
             let sheet_cell = |col_idx: usize| SheetCell {
                 row: row_number,
@@ -1492,11 +1690,6 @@ impl ExcelValidator {
                 )),
             }
             let units = Units::parse(row.get(samples.units));
-            if matches!(&units, Units::Other(units) if units.eq_ignore_ascii_case(NANOGRAMS_PER_MILLILITRE))
-            {
-                ng_per_ml_rows.push(format!("row {row_number}"));
-                continue;
-            }
             let lod = number_in(&json_obj, LOD_FIELD);
             let loq = number_in(&json_obj, LOQ_FIELD);
             let sheet_detection = json_obj
@@ -1628,12 +1821,23 @@ impl ExcelValidator {
             ));
         }
 
-        if !ng_per_ml_rows.is_empty() {
+        let ng_per_ml_rows = match &samples {
+            Some(samples) if ng_per_ml_count > 0 => {
+                ng_per_ml_rows(&range, first_row, first_col, &columns, &kept, samples)
+            }
+            _ => Vec::new(),
+        };
+        let missing: Vec<String> = ng_per_ml_rows
+            .iter()
+            .filter(|row| matches!(row.counterpart, Counterpart::Missing(_)))
+            .map(ToString::to_string)
+            .collect();
+        if !missing.is_empty() {
             problems.push(format!(
-                "The sheet \"{}\" has {} row(s) in {NANOGRAMS_PER_MILLILITRE}. Only ng/L is imported, and the ng/L rows are usually calculated from the {NANOGRAMS_PER_MILLILITRE} rows by formulas: replace those formulas with their values, then delete the {NANOGRAMS_PER_MILLILITRE} rows in the source file and try again:\n  {}",
+                "The sheet \"{}\" has {} {NANOGRAMS_PER_MILLILITRE} row(s) whose values no ng/L row holds. Only ng/L is imported, so each {NANOGRAMS_PER_MILLILITRE} row is skipped, and its values must be in an ng/L row: correct the ng/L rows in the source file and try again:\n  {}",
                 self.sheet_name,
-                ng_per_ml_rows.len(),
-                ng_per_ml_rows.join("\n  ")
+                missing.len(),
+                missing.join("\n  ")
             ));
         }
 
@@ -1688,6 +1892,11 @@ impl ExcelValidator {
                 })
                 .unwrap_or_default();
             let mut blanks = String::new();
+            if ng_per_ml_count > 0 {
+                blanks.push_str(&format!(
+                    "; {ng_per_ml_count} {NANOGRAMS_PER_MILLILITRE} row(s) skipped"
+                ));
+            }
             if blank_sample_cells > 0 {
                 blanks.push_str(&format!("; {blank_sample_cells} blank sample cell(s) skipped"));
             }
@@ -1754,6 +1963,7 @@ impl ExcelValidator {
             }),
             changes,
             questions: questions.into_iter().collect(),
+            ng_per_ml_rows,
             problems,
             values_markers,
         })
@@ -3271,6 +3481,69 @@ fn column_span(columns: &[(usize, &str)], first_col: u32) -> String {
         (Some(only), _) => format!("{} ({})", letter(only.0), only.1),
         _ => String::from("(none)"),
     }
+}
+
+/// The row number Excel shows of the row `row_index` places into a range starting at row
+/// `first_row`
+fn sheet_row(first_row: u32, row_index: usize) -> usize {
+    usize::try_from(first_row)
+        .unwrap_or(usize::MAX)
+        .saturating_add(row_index)
+        .saturating_add(1)
+}
+
+/// The ng/mL rows of `range`, an unpivoted sheet laid out in `columns`, `kept` and `samples`, each
+/// with its ng/L row
+fn ng_per_ml_rows(
+    range: &calamine::Range<Data>,
+    first_row: u32,
+    first_col: u32,
+    columns: &[Option<String>],
+    kept: &[usize],
+    samples: &SampleColumns,
+) -> Vec<NgPerMlRow> {
+    let compared_column = |index: usize, factor: f64| ComparedColumn {
+        column: column_name(sheet_column(first_col, index)),
+        header: columns.get(index).cloned().flatten(),
+        index,
+        factor,
+    };
+    let compared: Vec<ComparedColumn> = kept
+        .iter()
+        .filter(|&&index| index != samples.units)
+        .map(|&index| {
+            let is_limit = columns
+                .get(index)
+                .and_then(Option::as_deref)
+                .is_some_and(|header| header == LOD_FIELD || header == LOQ_FIELD);
+            compared_column(index, if is_limit { MILLILITRES_PER_LITRE } else { 1.0 })
+        })
+        .chain(
+            samples
+                .columns
+                .iter()
+                .map(|(index, _)| compared_column(*index, MILLILITRES_PER_LITRE)),
+        )
+        .collect();
+
+    let mut ng_per_ml: Vec<(usize, &[Data])> = Vec::new();
+    let mut ng_per_litre: Vec<(usize, &[Data])> = Vec::new();
+    // The first row holds the headers
+    for (row_index, row) in range.rows().enumerate().skip(1) {
+        let units = Units::parse(row.get(samples.units));
+        if units.is_ng_per_ml() {
+            ng_per_ml.push((sheet_row(first_row, row_index), row));
+        } else if units == Units::NanogramsPerLitre {
+            ng_per_litre.push((sheet_row(first_row, row_index), row));
+        }
+    }
+    ng_per_ml
+        .into_iter()
+        .map(|(row, cells)| NgPerMlRow {
+            counterpart: counterpart(cells, &ng_per_litre, &compared),
+            row,
+        })
+        .collect()
 }
 
 /// The 0-based sheet column of the cell `offset` places into a range starting at column `start`.

@@ -3,7 +3,7 @@
 //! at its source. One file per run, named like the run's CSV file (see
 //! [`crate::utils::RunFiles`]).
 
-use excel_core::{Change, Question};
+use excel_core::{Change, NgPerMlRow, Question};
 use std::fs::File;
 use std::io::{self, Write};
 
@@ -35,6 +35,20 @@ pub fn questions_lines(questions: &[(Question, usize)]) -> Vec<String> {
             .iter()
             .map(|(question, cells)| format!("  [{cells} cell(s)] {question}")),
     );
+    lines
+}
+
+/// The run log's lines for the ng/mL rows skipped, each with the ng/L row holding its values or
+/// the closest one; none without ng/mL rows
+pub fn ng_per_ml_rows_lines(rows: &[NgPerMlRow]) -> Vec<String> {
+    if rows.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![format!(
+        "{} ng/mL row(s) skipped, as only ng/L is imported, each with the ng/L row holding its values:",
+        rows.len()
+    )];
+    lines.extend(rows.iter().map(|row| format!("  {row}")));
     lines
 }
 
@@ -77,7 +91,8 @@ impl RunLog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use excel_core::{SheetCell, SkipReason};
+    use excel_core::{Closest, Counterpart, Difference, SheetCell, SkipReason};
+    use std::num::NonZeroUsize;
 
     fn cell() -> SheetCell {
         SheetCell {
@@ -135,5 +150,43 @@ mod tests {
     #[test]
     fn without_questions_the_log_has_no_questions_section() {
         assert_eq!(questions_lines(&[]), Vec::<String>::new());
+    }
+
+    #[test]
+    fn ng_per_ml_rows_are_counted_and_listed_whether_their_ng_l_row_is_found_or_not() {
+        let rows = [
+            NgPerMlRow {
+                counterpart: Counterpart::Found(23),
+                row: 2,
+            },
+            NgPerMlRow {
+                counterpart: Counterpart::Missing(Some(Closest {
+                    first: Difference {
+                        cell: cell(),
+                        expected: "0.25".to_string(),
+                        found: "blank".to_string(),
+                    },
+                    differences: NonZeroUsize::MIN,
+                })),
+                row: 3,
+            },
+            NgPerMlRow {
+                counterpart: Counterpart::Missing(None),
+                row: 5,
+            },
+        ];
+
+        let expected = vec![
+            "3 ng/mL row(s) skipped, as only ng/L is imported, each with the ng/L row holding its values:",
+            "  row 2: skipped: in ng/mL; its values are in the ng/L row 23, which is imported",
+            "  row 3: skipped: in ng/mL, but no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row 4, differs in 1 cell(s), first at row 4, column L \"ST03\": 0.25 expected, blank found",
+            "  row 5: skipped: in ng/mL, but the sheet has no ng/L row to hold its values",
+        ];
+        assert_eq!(ng_per_ml_rows_lines(&rows), expected);
+    }
+
+    #[test]
+    fn without_ng_per_ml_rows_the_log_has_no_ng_per_ml_section() {
+        assert_eq!(ng_per_ml_rows_lines(&[]), Vec::<String>::new());
     }
 }

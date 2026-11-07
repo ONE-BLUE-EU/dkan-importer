@@ -18,10 +18,10 @@ pub mod writers;
 pub mod test_utils;
 
 pub use excel_validator::{
-    Change, DEFAULT_MARKER_LIMITS, DEFAULT_VALUES_MARKERS, DETECTION_FIELD, ExcelValidator,
-    ExcelValidatorBuilder, FieldSchema, IDENTIFICATION_LEVEL, IDENTIFICATION_LEVEL_FIELD,
-    LOD_FIELD, LOQ_FIELD, MarkerLimit, Question, SchemaType, SheetCell, SkipReason, UNITS_FIELD,
-    Unpivot, parse_values_marker,
+    Change, Closest, Counterpart, DEFAULT_MARKER_LIMITS, DEFAULT_VALUES_MARKERS, DETECTION_FIELD,
+    Difference, ExcelValidator, ExcelValidatorBuilder, FieldSchema, IDENTIFICATION_LEVEL,
+    IDENTIFICATION_LEVEL_FIELD, LOD_FIELD, LOQ_FIELD, MarkerLimit, NgPerMlRow, Question,
+    SchemaType, SheetCell, SkipReason, UNITS_FIELD, Unpivot, parse_values_marker,
 };
 
 pub const ERRORS_LOG_FILE: &str = "errors.log";

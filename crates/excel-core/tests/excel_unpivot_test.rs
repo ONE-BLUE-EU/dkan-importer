@@ -1515,8 +1515,8 @@ fn every_problem_is_reported_in_one_run_with_the_changes_and_questions() {
             vec![Empty, Text("items"), Empty, Empty, Number(1.5), Number(2.0)],
         ],
     );
-    // Row 3's identification level is not 2A
-    rows[2][1] = Number(1.0);
+    // Row 4's identification level is not 2A
+    rows[3][1] = Number(1.0);
     let xlsx = write_test_workbook("all-problems", &rows);
 
     let mut validator = ExcelValidatorBuilder::new(xlsx.to_str().unwrap(), "Sheet1", text_schema())
@@ -1547,50 +1547,241 @@ fn every_problem_is_reported_in_one_run_with_the_changes_and_questions() {
     // X in ng/L, the 1.5 items, and "detected, not quantified" for row 2's 0.2
     assert_eq!(questions.len(), 3, "{questions:?}");
     let expected = "The sheet \"Sheet1\" has 1 row(s) whose Identification Level is not 2A. Analytical results are always identification level 2A: correct these cells in the source file and try again:
-  row 3: 1";
+  row 4: 1";
     assert!(err.contains(expected), "{err}");
-    assert!(err.contains("has 1 row(s) in ng/mL"), "{err}");
+    assert!(
+        err.contains("has 1 ng/mL row(s) whose values no ng/L row holds"),
+        "{err}"
+    );
 }
 
-/// Only ng/L is imported. The ng/L rows are calculated from the ng/mL rows by formulas, so the
-/// ng/mL rows must go from the source file, once the formulas are replaced by their values.
+/// What the validator built from `rows` says: its ng/mL rows as the run log lists them, its
+/// changes, and the error of the run, if it stops.
+struct NgPerMlRun {
+    ng_per_ml_rows: Vec<String>,
+    changes: Vec<String>,
+    summary: String,
+    error: Option<String>,
+}
+
+fn run_ng_per_ml(name: &str, rows: &[Vec<Cell>]) -> NgPerMlRun {
+    let xlsx = write_test_workbook(name, rows);
+    let mut validator = ExcelValidatorBuilder::new(xlsx.to_str().unwrap(), "Sheet1", text_schema())
+        .unpivot(spec())
+        .build()
+        .unwrap_or_else(|e| panic!("ng/mL rows must not stop the build: {e:#}"));
+    let _ = std::fs::remove_file(&xlsx);
+    NgPerMlRun {
+        ng_per_ml_rows: validator
+            .ng_per_ml_rows()
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        changes: validator
+            .changes()
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        summary: validator.unpivot_summary().unwrap_or_default().to_string(),
+        error: validator.validate_excel().err().map(|e| e.to_string()),
+    }
+}
+
+/// Only ng/L is imported. Some sheets keep ng/mL rows beside the ng/L rows calculated from them
+/// by formulas, so an ng/mL row is skipped when an ng/L row holds its values: the same text
+/// (ignoring case and spaces), and its numbers x1000 in the limits and the sample columns. Where
+/// the ng/mL row is blank, or holds an Excel error, the ng/L row may hold anything.
 #[test]
-fn ng_ml_rows_stop_the_run_asking_to_remove_them_from_the_source() {
+fn ng_ml_rows_are_skipped_when_an_ng_l_row_holds_their_values() {
+    let rows = analytical_sheet(
+        &["ST01", "ST02", "ST03"],
+        vec![
+            // Row 2: the ng/L row calculated from row 3, with the values Excel saved, which
+            // agree with x1000 to 10 significant digits
+            vec![
+                Empty,
+                Text("ng/L"),
+                Number(0.086),
+                Number(0.344),
+                Number(34.79658006),
+                Text("<LOQ"),
+                Empty,
+            ],
+            vec![
+                Empty,
+                Text("ng/mL"),
+                Number(8.599999999999999e-05),
+                Number(0.00034399999999999996),
+                Number(0.03479658005914394),
+                Text("<loq"),
+                Error("#VALUE!"),
+            ],
+            // Row 4: in ng/mL, ignoring case and spaces; its ng/L row comes after it
+            vec![
+                Empty,
+                Text(" NG/ml "),
+                Number(0.0001),
+                Number(0.00025),
+                Empty,
+                Number(0.0003),
+                Empty,
+            ],
+            vec![
+                Text("detected quantitatively"),
+                Text("ng/L"),
+                Number(0.1),
+                Number(0.25),
+                Empty,
+                Number(0.3),
+                Empty,
+            ],
+        ],
+    );
+
+    let run = run_ng_per_ml("ng-ml-equivalent", &rows);
+
+    let expected = vec![
+        "row 3: skipped: in ng/mL; its values are in the ng/L row 2, which is imported",
+        "row 4: skipped: in ng/mL; its values are in the ng/L row 5, which is imported",
+    ];
+    assert_eq!(run.ng_per_ml_rows, expected);
+    assert_eq!(run.error, None);
+    // Row 3's #VALUE! is not emptied for the upload: the row is not uploaded
+    assert_eq!(run.changes, Vec::<String>::new());
+    assert!(
+        run.summary.contains("3 row(s); 2 ng/mL row(s) skipped"),
+        "{}",
+        run.summary
+    );
+
+    let unpivoted = run_with_schema("ng-ml-equivalent-csv", &rows, spec(), text_schema()).unwrap();
+    let expected = vec![
+        "Substance,Sample Tag,Concentration,Concentration units",
+        "Okadaic acid,ST01,34.79658006,ng/L",
+        "Okadaic acid,ST02,<LOQ,ng/L",
+        "Okadaic acid,ST02,0.3,ng/L",
+    ];
+    assert_eq!(
+        unpivoted.columns(&[
+            "Substance",
+            "Sample Tag",
+            "Concentration",
+            "Concentration units"
+        ]),
+        expected
+    );
+}
+
+/// An ng/mL row whose values no ng/L row holds is still skipped, but stops the run, naming the
+/// ng/L row closest to it and its first difference, as a formula in it may point at the wrong row.
+#[test]
+fn an_ng_ml_row_without_an_equivalent_ng_l_row_stops_the_run_naming_the_closest() {
     let rows = analytical_sheet(
         &["ST01", "ST02"],
         vec![
             vec![
                 Empty,
                 Text("ng/mL"),
-                Number(0.1),
-                Number(0.25),
-                Number(0.3),
+                Number(0.0001),
+                Number(0.00025),
+                Number(0.0003),
+                Text("<LOD"),
+            ],
+            // Rows 3 and 5: the limit and the result x100, and another marker
+            vec![
                 Empty,
+                Text("ng/L"),
+                Number(0.1),
+                Number(0.025),
+                Number(0.03),
+                Text("<LOQ"),
+            ],
+            // Row 4: the limit of quantification is missing
+            vec![
+                Empty,
+                Text("ng/L"),
+                Number(0.1),
+                Empty,
+                Number(0.3),
+                Text("<LOD"),
             ],
             vec![
                 Empty,
                 Text("ng/L"),
-                Number(100.0),
-                Number(250.0),
-                Number(300.0),
-                Empty,
-            ],
-            vec![
-                Empty,
-                Text(" NG/ml "),
                 Number(0.1),
-                Number(0.25),
-                Empty,
+                Number(0.025),
+                Number(0.03),
                 Text("<LOQ"),
             ],
         ],
     );
 
-    let err = run_with_schema("detection-ng-ml", &rows, spec(), text_schema()).unwrap_err();
+    let run = run_ng_per_ml("ng-ml-not-equivalent", &rows);
 
-    let expected = "The sheet \"Sheet1\" has 2 row(s) in ng/mL. Only ng/L is imported, and the ng/L rows are usually calculated from the ng/mL rows by formulas: replace those formulas with their values, then delete the ng/mL rows in the source file and try again:
-  row 2
-  row 4";
-    assert!(err.contains(expected), "{err}");
-    assert!(!err.contains("row 3"), "{err}");
+    let line = "row 2: skipped: in ng/mL, but no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row 4, differs in 1 cell(s), first at row 4, column F \"Limit of quantification\": 0.25 expected, blank found";
+    assert_eq!(run.ng_per_ml_rows, vec![line]);
+    let error = run.error.expect("the missing ng/L row must stop the run");
+    let expected = format!(
+        "The sheet \"Sheet1\" has 1 ng/mL row(s) whose values no ng/L row holds. Only ng/L is imported, so each ng/mL row is skipped, and its values must be in an ng/L row: correct the ng/L rows in the source file and try again:\n  {line}"
+    );
+    assert!(error.contains(&expected), "{error}");
+}
+
+#[test]
+fn an_ng_ml_row_in_a_sheet_without_ng_l_rows_stops_the_run() {
+    let rows = analytical_sheet(
+        &["ST01"],
+        vec![
+            vec![
+                Empty,
+                Text("ng/mL"),
+                Number(0.0001),
+                Number(0.00025),
+                Number(0.0003),
+            ],
+            vec![Empty, Text("Peak Area"), Empty, Empty, Text("X")],
+        ],
+    );
+
+    let run = run_ng_per_ml("ng-ml-no-ng-l", &rows);
+
+    let line = "row 2: skipped: in ng/mL, but the sheet has no ng/L row to hold its values";
+    assert_eq!(run.ng_per_ml_rows, vec![line]);
+    let error = run.error.expect("the missing ng/L row must stop the run");
+    assert!(error.contains(&format!("\n  {line}")), "{error}");
+}
+
+/// An ng/mL row is not imported, so its identification level is not checked; its ng/L row's is.
+#[test]
+fn the_identification_level_of_an_ng_ml_row_is_not_checked() {
+    let mut rows = analytical_sheet(
+        &["ST01"],
+        vec![
+            vec![
+                Empty,
+                Text("ng/mL"),
+                Number(0.0001),
+                Number(0.00025),
+                Number(0.0003),
+            ],
+            vec![Empty, Text("ng/L"), Number(0.1), Number(0.25), Number(0.3)],
+        ],
+    );
+    rows[1][1] = Number(1.0);
+    rows[2][1] = Number(1.0);
+
+    let run = run_ng_per_ml("ng-ml-identification-level", &rows);
+
+    let expected =
+        vec!["row 2: skipped: in ng/mL; its values are in the ng/L row 3, which is imported"];
+    assert_eq!(run.ng_per_ml_rows, expected);
+    let error = run
+        .error
+        .expect("row 3's identification level must stop the run");
+    assert!(
+        error.contains("has 1 row(s) whose Identification Level is not 2A"),
+        "{error}"
+    );
+    assert!(error.contains("\n  row 3: 1"), "{error}");
+    assert!(!error.contains("\n  row 2: 1"), "{error}");
 }

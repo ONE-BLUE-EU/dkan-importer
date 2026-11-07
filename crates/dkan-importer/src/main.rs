@@ -6,7 +6,7 @@
 use clap::Parser;
 use dkan_importer::{
     model::DataDictionary,
-    run_log::{RunLog, changes_lines, questions_lines},
+    run_log::{RunLog, changes_lines, ng_per_ml_rows_lines, questions_lines},
     utils::{
         RunFiles, check_upload_login, dataset_add_distribution, delete_remote_file,
         upload_distribution_csv_file,
@@ -293,6 +293,7 @@ fn run(
     if let Some(summary) = validator.extra_columns_summary() {
         log.info(&format!("✅ {summary}"))?;
     }
+    log.notes(&ng_per_ml_rows_lines(validator.ng_per_ml_rows()))?;
     log.notes(&changes_lines(validator.changes()))?;
     let questions = validator.questions();
     if !questions.is_empty() {

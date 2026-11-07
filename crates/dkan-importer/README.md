@@ -143,7 +143,15 @@ Each result's "Detection characterisation" is worked out from its row's "Concent
 | items | a whole number, 0 or more | detected quantitatively |
 
 - Where the result's characterisation differs from the sheet's own, the run log says so, with the reason: `row 2, column AQ "24019033": Detection characterisation "detected, not quantified" instead of "detected quantitatively": the result is <LOQ`.
-- Rows in ng/mL stop the run before anything is written or uploaded, listed by row: only ng/L is imported. In sheets that keep them, the ng/L rows are calculated from the ng/mL rows by formulas, so replace those formulas with their values, then delete the ng/mL rows in the source file.
+- Rows in ng/mL (matched ignoring case and spaces) are skipped: only ng/L is imported. Sheets keep them beside the ng/L rows calculated from them by formulas, which the importer reads as the values Excel saved, so the source file needs no change. Each ng/mL row's values must be in an ng/L row of the sheet: the same text (ignoring case and spaces), and its numbers x1000 in the limits and the sample columns, to 6 significant digits. Where the ng/mL row is blank or holds an Excel error, the ng/L row may hold anything (such as a Classification). The summary counts the skipped rows, and the run log lists each, with its ng/L row:
+
+  ```
+  2 ng/mL row(s) skipped, as only ng/L is imported, each with the ng/L row holding its values:
+    row 2: skipped: in ng/mL; its values are in the ng/L row 23, which is imported
+    row 18: skipped: in ng/mL, but no ng/L row has its values (x1000 in the limits and the sample columns); the closest, row 39, differs in 1 cell(s), first at row 39, column J "Limit of quantification": 0.6746666666666667 expected, blank found
+  ```
+
+  An ng/mL row whose values no ng/L row holds stops the run, naming the ng/L row differing from it in the fewest cells, as a formula there may point at the wrong row. An ng/mL row's identification level is not checked, as it is not imported.
 - What is not clear yet is not imported: the cell gives no row, the run log lists it, and asks the data owners one question per kind of case, with the number of cells. The importer prints how many questions there are. These are: an ng/L row without both limits, a number in a Peak Area row, `X` in an ng/L row (X is a Peak Area result), an items result that is not a whole number of 0 or more, other units (such as ug/kg), any other result without units or with a marker that has no characterisation. "detected, not quantified" is also asked about, as the template's dropdown list has "detected semiquantitatively" instead.
 
 ### Keeping extra columns
@@ -252,7 +260,7 @@ Blank sample cells are not listed, as a sheet has thousands: the summary line co
 
 Rows that fail validation are not changes: they are listed in `errors.log`.
 
-Problems that must be corrected in the source file (an Identification Level that is not `2A`, rows in ng/mL, data in a column without a header) stop the run only once every row has been read. So one run reports all of them together, after the summary, the changes and the questions, and nothing is written or uploaded.
+Problems that must be corrected in the source file (an Identification Level that is not `2A`, an ng/mL row whose values no ng/L row holds, data in a column without a header) stop the run only once every row has been read. So one run reports all of them together, after the summary, the changes and the questions, and nothing is written or uploaded.
 
 ### Error Log File
 The application creates an `errors.log` file containing:
