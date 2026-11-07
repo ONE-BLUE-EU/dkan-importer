@@ -163,7 +163,7 @@ impl Environment for FakeEnvironment {
 
 /// What a run did
 struct Outcome {
-    /// The error that stopped it, if any
+    /// The error that stopped it, if any, as printed
     error: Option<String>,
     calls: Vec<Call>,
     log: String,
@@ -238,17 +238,22 @@ fn run_import(import: &Import, mut environment: FakeEnvironment) -> Outcome {
         .map(|dkan| Rc::clone(&dkan.calls))
         .unwrap_or_default();
     let mut log = RunLog::new(Vec::new(), Vec::new(), Vec::new());
-    let error = run(import, &mut environment, &mut log)
-        .err()
-        .map(|e| e.to_string());
+    let succeeded = run(import, &mut environment, &mut log).expect("the run log must be written");
     let (log, stdout, stderr) = log.into_parts();
+    let stderr = String::from_utf8(stderr).unwrap();
+    // The run prints the error that stopped it, and only that, to the standard error
+    let error = stderr
+        .strip_prefix("❌ ")
+        .map(|error| error.strip_suffix('\n').unwrap_or(error).to_string());
+    assert_eq!(error.is_none(), stderr.is_empty(), "{stderr}");
+    assert_eq!(succeeded, error.is_none(), "{stderr}");
     let calls = calls.borrow().clone();
     Outcome {
         error,
         calls,
         log: String::from_utf8(log).unwrap(),
         stdout: String::from_utf8(stdout).unwrap(),
-        stderr: String::from_utf8(stderr).unwrap(),
+        stderr,
         connections: environment.connections,
         error_log: environment.error_log,
     }
@@ -277,6 +282,20 @@ fn header_with_names() -> String {
 
 /// In place of a name, when the run stopped before DKAN could give it
 const NOT_REACHED: &str = "(not read: the run stopped before reaching DKAN)";
+
+/// The last lines of every run: what became of the CSV file and of the upload
+fn closing(csv: &str, upload: &str) -> String {
+    format!("\n{csv}\n{upload}\n")
+}
+
+const CSV_GENERATED: &str = "✅ CSV file generated: samples_ds-1.csv (2 row(s))";
+const CSV_NOT_GENERATED: &str = "❌ CSV file not generated";
+const NOTHING_UPLOADED: &str = "❌ Nothing uploaded";
+
+/// The last lines of a run stopped before the CSV file was generated
+fn nothing_done() -> String {
+    closing(CSV_NOT_GENERATED, NOTHING_UPLOADED)
+}
 
 fn upload() -> Call {
     Call::Upload {
@@ -317,17 +336,14 @@ fn a_valid_sheet_is_uploaded_and_added_as_a_new_distribution() {
     assert_eq!(outcome.calls, expected);
     let expected_connections = vec![(BASE_URL.to_string(), "admin".to_string())];
     assert_eq!(outcome.connections, expected_connections);
-    let printed = "✅ Validation completed!
-✅ CSV file created: samples_ds-1.csv
-✅ Successfully added CSV distribution 'samples_ds-1.csv' to dataset \"Samples dataset\" with id \"ds-1\"
-";
+    let closing = closing(
+        CSV_GENERATED,
+        "✅ Uploaded samples_ds-1.csv and added it to dataset \"Samples dataset\" (ds-1) as a new distribution",
+    );
+    let printed = format!("✅ Validation completed!\n{closing}");
     assert_eq!(outcome.stdout, printed);
     let logged = format!(
-        "{}No cell changed: every cell was taken as written.
-✅ Validation completed!
-✅ CSV file created: samples_ds-1.csv
-✅ Successfully added CSV distribution 'samples_ds-1.csv' to dataset \"Samples dataset\" with id \"ds-1\"
-",
+        "{}No cell changed: every cell was taken as written.\n{printed}",
         header_with_names()
     );
     assert_eq!(outcome.log, logged);
@@ -352,11 +368,12 @@ fn the_distribution_replaced_has_its_file_deleted_once_the_new_one_is_added() {
         Call::Delete("old.csv".to_string()),
     ];
     assert_eq!(outcome.calls, expected);
-    let printed = "✅ Successfully replaced CSV distribution 'old.csv' with 'samples_ds-1.csv' in dataset \"Samples dataset\" with id \"ds-1\"
-🧹 Previous CSV file successfully deleted: old.csv
-";
-    assert!(outcome.stdout.ends_with(printed), "{}", outcome.stdout);
-    assert!(outcome.log.ends_with(printed), "{}", outcome.log);
+    let printed = closing(
+        CSV_GENERATED,
+        "✅ Uploaded samples_ds-1.csv and added it to dataset \"Samples dataset\" (ds-1), replacing old.csv, whose file was deleted",
+    );
+    assert!(outcome.stdout.ends_with(&printed), "{}", outcome.stdout);
+    assert!(outcome.log.ends_with(&printed), "{}", outcome.log);
 }
 
 #[test]
@@ -373,7 +390,13 @@ fn a_url_that_is_not_https_stops_the_run_before_reading_the_file_or_connecting()
     assert_eq!(outcome.error.as_deref(), Some(expected));
     assert!(outcome.connections.is_empty());
     assert!(outcome.calls.is_empty());
-    assert_eq!(outcome.log, header(NOT_REACHED, NOT_REACHED));
+    let logged = format!(
+        "{}❌ {expected}\n{}",
+        header(NOT_REACHED, NOT_REACHED),
+        nothing_done()
+    );
+    assert_eq!(outcome.log, logged);
+    assert_eq!(outcome.stdout, nothing_done());
 }
 
 #[test]
@@ -387,7 +410,12 @@ fn an_unreadable_excel_file_stops_the_run_before_asking_for_the_password() {
     assert_eq!(outcome.error.as_deref(), Some(expected));
     assert!(outcome.connections.is_empty());
     assert!(outcome.calls.is_empty());
-    assert_eq!(outcome.log, header(NOT_REACHED, NOT_REACHED));
+    let logged = format!(
+        "{}❌ {expected}\n{}",
+        header(NOT_REACHED, NOT_REACHED),
+        nothing_done()
+    );
+    assert_eq!(outcome.log, logged);
 }
 
 #[test]
@@ -399,8 +427,13 @@ fn a_rejected_login_stops_the_run_before_the_data_dictionary() {
 
     assert_eq!(outcome.error.as_deref(), Some("DKAN refused the Login"));
     assert_eq!(outcome.calls, vec![Call::CheckLogin]);
-    assert_eq!(outcome.stdout, "");
-    assert_eq!(outcome.log, header(NOT_REACHED, NOT_REACHED));
+    assert_eq!(outcome.stdout, nothing_done());
+    let logged = format!(
+        "{}❌ DKAN refused the Login\n{}",
+        header(NOT_REACHED, NOT_REACHED),
+        nothing_done()
+    );
+    assert_eq!(outcome.log, logged);
 }
 
 #[test]
@@ -418,7 +451,11 @@ fn a_data_dictionary_that_cannot_be_read_stops_the_run_before_the_upload() {
         outcome.calls,
         vec![Call::CheckLogin, dataset_title(), data_dictionary()]
     );
-    let expected = header(DATASET_TITLE, "(not read: DKAN refused the DataDictionary)");
+    let expected = format!(
+        "{}❌ DKAN refused the DataDictionary\n{}",
+        header(DATASET_TITLE, "(not read: DKAN refused the DataDictionary)"),
+        nothing_done()
+    );
     assert_eq!(outcome.log, expected);
 }
 
@@ -446,6 +483,12 @@ fn rows_failing_validation_go_to_the_error_log_and_nothing_is_uploaded() {
     assert_eq!(title, VALIDATION_REPORT_TITLE);
     assert!(report.contains("Row 3: 1 error(s)\n"), "{report}");
     assert!(report.contains("\"deep\""), "{report}");
+    assert!(
+        outcome.stdout.ends_with(&nothing_done()),
+        "{}",
+        outcome.stdout
+    );
+    assert!(outcome.log.ends_with(&nothing_done()), "{}", outcome.log);
 }
 
 #[test]
@@ -562,6 +605,9 @@ fn a_failed_upload_stops_the_run_before_the_distribution_is_added() {
         upload(),
     ];
     assert_eq!(outcome.calls, expected);
+    let printed = closing(CSV_GENERATED, NOTHING_UPLOADED);
+    assert!(outcome.stdout.ends_with(&printed), "{}", outcome.stdout);
+    assert!(outcome.log.ends_with(&printed), "{}", outcome.log);
 }
 
 #[test]
@@ -586,6 +632,12 @@ fn a_distribution_not_added_stops_the_run_before_the_previous_file_is_deleted() 
         add_distribution(),
     ];
     assert_eq!(outcome.calls, expected);
+    let printed = closing(
+        CSV_GENERATED,
+        "❌ Uploaded samples_ds-1.csv to https://dkan.example/files/samples_ds-1.csv, but not added to dataset ds-1",
+    );
+    assert!(outcome.stdout.ends_with(&printed), "{}", outcome.stdout);
+    assert!(outcome.log.ends_with(&printed), "{}", outcome.log);
 }
 
 #[test]
@@ -600,14 +652,12 @@ fn a_previous_file_not_deleted_stops_the_run_after_the_distribution_is_added() {
         outcome.calls.last(),
         Some(&Call::Delete("old.csv".to_string()))
     );
-    assert!(
-        outcome
-            .log
-            .contains("✅ Successfully replaced CSV distribution 'old.csv'"),
-        "{}",
-        outcome.log
+    let printed = closing(
+        CSV_GENERATED,
+        "⚠️  Uploaded samples_ds-1.csv and added it to dataset \"Samples dataset\" (ds-1), replacing old.csv, whose file could not be deleted",
     );
-    assert!(!outcome.log.contains("🧹"), "{}", outcome.log);
+    assert!(outcome.stdout.ends_with(&printed), "{}", outcome.stdout);
+    assert!(outcome.log.ends_with(&printed), "{}", outcome.log);
 }
 
 /// The name is only for the run log: a dataset whose name cannot be read is still imported into,

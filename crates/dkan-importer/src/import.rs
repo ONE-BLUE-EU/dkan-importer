@@ -129,12 +129,101 @@ fn reach_dkan<E: Environment>(
     })
 }
 
-/// Run `import`, logging every step to `log`. Stops at the first failure, before anything is
-/// uploaded when the file, the login, the data dictionary or the rows are refused.
+/// How far an import got, for the last lines of the run
+enum Progress {
+    NothingGenerated,
+    CsvGenerated {
+        rows: usize,
+    },
+    /// The CSV file uploaded, not yet added to the dataset
+    Uploaded {
+        rows: usize,
+        file_url: String,
+    },
+    Added {
+        rows: usize,
+        dataset_title: String,
+        replaced: Replaced,
+    },
+}
+
+/// The CSV distribution replaced by the one added
+enum Replaced {
+    Nothing,
+    /// Its file, deleted
+    Deleted(String),
+    /// Its file, not deleted (yet)
+    NotDeleted(String),
+}
+
+/// The last two lines of every run: whether the CSV file was generated, under which name, and
+/// whether it was uploaded and added to the dataset
+fn closing_lines(import: &Import, progress: &Progress) -> [String; 2] {
+    let name = &import.csv_file_name;
+    let csv = match progress {
+        Progress::NothingGenerated => "❌ CSV file not generated".to_string(),
+        Progress::CsvGenerated { rows }
+        | Progress::Uploaded { rows, .. }
+        | Progress::Added { rows, .. } => format!("✅ CSV file generated: {name} ({rows} row(s))"),
+    };
+    let upload = match progress {
+        Progress::NothingGenerated | Progress::CsvGenerated { .. } => {
+            "❌ Nothing uploaded".to_string()
+        }
+        Progress::Uploaded { file_url, .. } => format!(
+            "❌ Uploaded {name} to {file_url}, but not added to dataset {}",
+            import.dataset_id
+        ),
+        Progress::Added {
+            dataset_title,
+            replaced,
+            ..
+        } => {
+            let added = format!(
+                "Uploaded {name} and added it to dataset \"{dataset_title}\" ({})",
+                import.dataset_id
+            );
+            match replaced {
+                Replaced::Nothing => format!("✅ {added} as a new distribution"),
+                Replaced::Deleted(previous) => {
+                    format!("✅ {added}, replacing {previous}, whose file was deleted")
+                }
+                Replaced::NotDeleted(previous) => {
+                    format!("⚠️  {added}, replacing {previous}, whose file could not be deleted")
+                }
+            }
+        }
+    };
+    [csv, upload]
+}
+
+/// Run `import`, logging every step to `log`, then the error that stopped it, if any, and last
+/// what became of the CSV file and of the upload. Stops at the first failure, before anything is
+/// uploaded when the file, the login, the data dictionary or the rows are refused. Whether it
+/// succeeded; an error only when the log cannot be written.
 pub fn run<E: Environment, L: Write, O: Write, R: Write>(
     import: &Import,
     environment: &mut E,
     log: &mut RunLog<L, O, R>,
+) -> io::Result<bool> {
+    let mut progress = Progress::NothingGenerated;
+    let result = steps(import, environment, log, &mut progress);
+    if let Err(e) = &result {
+        log.error(&format!("❌ {e}"))?;
+    }
+    log.info("")?;
+    for line in closing_lines(import, &progress) {
+        log.info(&line)?;
+    }
+    Ok(result.is_ok())
+}
+
+/// The steps of `import`, recording in `progress` how far it got
+fn steps<E: Environment, L: Write, O: Write, R: Write>(
+    import: &Import,
+    environment: &mut E,
+    log: &mut RunLog<L, O, R>,
+    progress: &mut Progress,
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
     let reached = reach_dkan(import, environment);
     let not_reached = || Name::NotRead(DKAN_NOT_REACHED.to_string());
@@ -213,9 +302,14 @@ pub fn run<E: Environment, L: Write, O: Write, R: Write>(
     let csv = validator
         .to_csv(&title_to_name_mapping)
         .map_err(|e| format!("Failed to create CSV with error: {e}"))?;
-    log.info(&format!("✅ CSV file created: {}", import.csv_file_name))?;
+    let rows = validator.rows().len();
+    *progress = Progress::CsvGenerated { rows };
 
     let file_url = dkan.upload_csv(&import.csv_file_name, csv)?;
+    *progress = Progress::Uploaded {
+        rows,
+        file_url: file_url.clone(),
+    };
     let added = dkan.add_distribution(
         &import.dataset_id,
         NewDistribution {
@@ -224,23 +318,21 @@ pub fn run<E: Environment, L: Write, O: Write, R: Write>(
             data_dictionary_url: &data_dictionary.url,
         },
     )?;
-    match &added.previous_csv_filename {
-        Some(previous) => log.info(&format!(
-            "✅ Successfully replaced CSV distribution '{}' with '{}' in dataset \"{}\" with id \"{}\"",
-            previous, import.csv_file_name, added.dataset_title, import.dataset_id
-        ))?,
-        None => log.info(&format!(
-            "✅ Successfully added CSV distribution '{}' to dataset \"{}\" with id \"{}\"",
-            import.csv_file_name, added.dataset_title, import.dataset_id
-        ))?,
-    }
+    *progress = Progress::Added {
+        rows,
+        dataset_title: added.dataset_title,
+        replaced: added
+            .previous_csv_filename
+            .clone()
+            .map_or(Replaced::Nothing, Replaced::NotDeleted),
+    };
 
     // The CSV it replaced is no longer used
-    if let Some(previous) = added.previous_csv_filename {
+    if let Some(previous) = added.previous_csv_filename
+        && let Progress::Added { replaced, .. } = progress
+    {
         dkan.delete_file(&previous)?;
-        log.info(&format!(
-            "🧹 Previous CSV file successfully deleted: {previous}"
-        ))?;
+        *replaced = Replaced::Deleted(previous);
     }
     Ok(())
 }

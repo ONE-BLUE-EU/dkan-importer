@@ -246,12 +246,12 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // The run prints its own error, and last what became of the CSV file and of the upload
     match run(&import, &mut environment, &mut log) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            if let Err(log_error) = log.error(&format!("❌ {e}")) {
-                eprintln!("❌ Cannot write the run log \"{log_path}\": {log_error}");
-            }
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::FAILURE,
+        Err(log_error) => {
+            eprintln!("❌ Cannot write the run log \"{log_path}\": {log_error}");
             ExitCode::FAILURE
         }
     }

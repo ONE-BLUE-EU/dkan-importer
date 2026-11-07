@@ -243,10 +243,16 @@ Example Excel structure:
 ## Output
 
 ### Console Output
-- Authentication status
-- Schema conversion progress
-- Real-time validation results
-- Upload progress and success confirmation
+- The summary of what was read (columns kept and unpivoted, rows, skipped cells), and the questions about the data
+- The error that stopped the run, if any, on the standard error
+- Last, in every run, whether it succeeded or stopped, what became of the CSV file and of the upload, also at the end of the run log:
+
+  ```
+  ✅ CSV file generated: analytical_results_(i)_2026-11-07_14-52-21_9e94380f-73d5-4655-9a0f-519adbff655c.csv (3312 row(s))
+  ✅ Uploaded analytical_results_(i)_2026-11-07_14-52-21_9e94380f-73d5-4655-9a0f-519adbff655c.csv and added it to dataset "Arctic Ocean - Arctic Ocean - 2023" (9e94380f-73d5-4655-9a0f-519adbff655c) as a new distribution
+  ```
+
+  The CSV file is generated in memory, and uploaded under that name without being written locally. A run that stops ends instead with `❌ CSV file not generated` and `❌ Nothing uploaded`; one that stops later says how far it got: the CSV generated but not uploaded (`❌ Nothing uploaded`), uploaded to its URL but not added to the dataset (`❌ Uploaded ... to <url>, but not added to dataset ...`), or added in place of a distribution whose file could not be deleted (`⚠️  Uploaded ..., replacing old.csv, whose file could not be deleted`). When it replaces one, the line says so: `..., replacing old.csv, whose file was deleted`.
 
 ### Run Log File
 Every run writes a log in the current directory, named exactly like the run's CSV file but ending in `.run.log`: `<sheet>_<YYYY-MM-DD_HH-MM-SS>_<dataset>.run.log`, lowercase, with the sheet name's spaces as `_`, as in `analytical_results_(i)_2026-11-05_10-00-00_some-dataset.run.log`. Each run writes its own log; the newest describes the latest run. It is written even when the run stops, and never contains the password. It holds:
@@ -262,7 +268,7 @@ Every run writes a log in the current directory, named exactly like the run's CS
   ```
 
   When a name is not read, the reason takes its place: `(not read: the run stopped before reaching DKAN)` for a run stopped by its URL, its file or the login, or DKAN's error. A dataset whose name cannot be read does not stop the run; a data dictionary that cannot be read does, once the top of the log is written.
-- Every line the run printed, including the error that stopped it
+- Every line the run printed, including the error that stopped it, and last what became of the CSV file and of the upload
 - Every change made to a cell instead of taking it as written, one line per cell with its value and its reason, so the data can be checked and corrected at its source:
 
 ```

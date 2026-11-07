@@ -339,6 +339,13 @@ Dictionary ID: some-id
         .find(|line| line.starts_with("❌") && line.contains("/api/importer/upload"))
         .unwrap_or_else(|| panic!("no error line in:\n{stderr}"));
     assert!(log.contains(error_line), "{error_line}\n{log}");
+    let closing = "\n❌ CSV file not generated\n❌ Nothing uploaded\n";
+    assert!(log.ends_with(closing), "{log}");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).ends_with(closing),
+        "{:?}",
+        output.stdout
+    );
     assert!(!log.contains(PASSWORD), "{log}");
     let _ = std::fs::remove_dir_all(&dir);
 }
