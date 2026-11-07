@@ -653,3 +653,23 @@ fn the_top_of_the_log_has_the_names_in_a_run_stopped_after_reaching_dkan() {
         outcome.log
     );
 }
+
+/// The top of the log names the file without its directories; an error names the whole path
+#[test]
+fn the_top_of_the_log_names_the_file_without_its_path() {
+    let mut import = import();
+    import.excel_file = "data/2026/samples.xlsx".to_string();
+    let mut environment = environment(valid_sheet(), dkan(None, None));
+    environment.excel = None;
+
+    let outcome = run_import(&import, environment);
+
+    assert!(
+        outcome.log.starts_with("Excel file: samples.xlsx\n"),
+        "{}",
+        outcome.log
+    );
+    let expected =
+        "Cannot read the Excel file \"data/2026/samples.xlsx\": no file data/2026/samples.xlsx";
+    assert_eq!(outcome.error.as_deref(), Some(expected));
+}

@@ -69,11 +69,18 @@ impl std::fmt::Display for Name {
     }
 }
 
+/// The name of the file at `path`, without its directories, whether separated by `/` or `\\`
+fn file_name(path: &str) -> &str {
+    path.rsplit(['/', '\\'])
+        .find(|part| !part.is_empty())
+        .unwrap_or(path)
+}
+
 /// The top of the run log: the file and sheet, then the dataset and the data dictionary, each with
 /// its name, then two blank lines
 fn header(import: &Import, dataset_name: &Name, dictionary_name: &Name) -> [String; 8] {
     [
-        format!("Excel file: {}", import.excel_file),
+        format!("Excel file: {}", file_name(&import.excel_file)),
         format!("Excel sheet: {}", import.sheet_name),
         format!("Dataset Name: {dataset_name}"),
         format!("Dataset ID: {}", import.dataset_id),
@@ -245,6 +252,32 @@ pub fn run<E: Environment, L: Write, O: Write, R: Write>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Whatever the path, relative or absolute, with `/` or `\\`
+    #[test]
+    fn the_file_name_is_the_path_without_its_directories() {
+        let cases = [
+            (
+                "Sample_Collection&Results_Arctic 1.xlsx",
+                "Sample_Collection&Results_Arctic 1.xlsx",
+            ),
+            (
+                "data/Sample_Collection&Results_Arctic 1.xlsx",
+                "Sample_Collection&Results_Arctic 1.xlsx",
+            ),
+            ("./data/samples.xlsx", "samples.xlsx"),
+            ("../../data/2026/samples.xlsx", "samples.xlsx"),
+            ("/home/user/data/samples.xlsx", "samples.xlsx"),
+            ("~/data/samples.xlsx", "samples.xlsx"),
+            ("data\\samples.xlsx", "samples.xlsx"),
+            ("C:\\Users\\user\\Desktop\\samples.xlsx", "samples.xlsx"),
+            ("data/2026\\samples.xlsx", "samples.xlsx"),
+            ("data/", "data"),
+        ];
+        for (path, expected) in cases {
+            assert_eq!(file_name(path), expected, "{path}");
+        }
+    }
 
     /// A reason such as an HTML error page keeps the name one line
     #[test]
