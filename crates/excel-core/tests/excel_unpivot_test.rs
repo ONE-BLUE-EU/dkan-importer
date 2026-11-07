@@ -1420,34 +1420,73 @@ fn unclear_results_give_no_row_and_a_question() {
     assert_eq!(unpivoted.questions, expected);
 }
 
-/// The characterisation replaces the sheet's own; where they differ, the run log says why.
+/// The characterisation replaces the sheet's own; where they differ, the run log says why, naming
+/// what the cell holds as written.
 #[test]
-fn a_characterisation_that_differs_from_the_sheets_is_listed_with_its_reason() {
+fn a_characterisation_that_differs_from_the_sheets_is_listed_with_what_the_cell_holds() {
     let rows = analytical_sheet(
         &["ST01", "ST02", "ST03"],
-        vec![vec![
-            Text("detected quantitatively"),
-            Text("ng/L"),
-            Number(0.1),
-            Number(0.25),
-            Number(0.3),
-            Number(0.2),
-            Text("<LOD"),
-        ]],
+        vec![
+            vec![
+                Text("not detected"),
+                Text("ng/L"),
+                Number(0.1),
+                Number(0.25),
+                Number(0.3),
+                Text("<loq"),
+                Number(0.2),
+            ],
+            vec![
+                Text("detected quantitatively"),
+                Text("ng/L"),
+                Number(0.1),
+                Number(0.25),
+                Number(0.05),
+                Text("<LOD"),
+                Empty,
+            ],
+            vec![
+                Text("not detected"),
+                Text("Peak Area"),
+                Empty,
+                Empty,
+                Text("X"),
+                Empty,
+                Empty,
+            ],
+            vec![
+                Text("not detected"),
+                Empty,
+                Empty,
+                Empty,
+                Text("X"),
+                Empty,
+                Empty,
+            ],
+            vec![
+                Text("not detected"),
+                Text("items"),
+                Empty,
+                Empty,
+                Number(3.0),
+                Empty,
+                Empty,
+            ],
+        ],
     );
 
     let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
 
     let expected = vec![
-        "Sample Tag,Concentration,Detection characterisation",
-        "ST01,0.3,detected quantitatively",
-        "ST02,0.2,detected, not quantified",
-        "ST03,<LOD,not detected",
-    ];
-    assert_eq!(unpivoted.columns(&RESULTS), expected);
-    let expected = vec![
-        "row 2, column H \"ST02\": Detection characterisation \"detected, not quantified\" instead of \"detected quantitatively\": 0.2 is between the Limit of detection (0.1) and the Limit of quantification (0.25)",
-        "row 2, column I \"ST03\": Detection characterisation \"not detected\" instead of \"detected quantitatively\": the result is <LOD",
+        "row 2, column G \"ST01\": Detection characterisation \"detected quantitatively\" instead of \"not detected\": the cell holds 0.3, at least the Limit of quantification (0.25)",
+        "row 2, column H \"ST02\": written as \"<LOQ\" instead of \"<loq\": markers are written uppercase",
+        "row 2, column H \"ST02\": Detection characterisation \"detected, not quantified\" instead of \"not detected\": the cell holds \"<loq\"",
+        "row 2, column I \"ST03\": Detection characterisation \"detected, not quantified\" instead of \"not detected\": the cell holds 0.2, between the Limit of detection (0.1) and the Limit of quantification (0.25)",
+        "row 3, column G \"ST01\": Detection characterisation \"not detected\" instead of \"detected quantitatively\": the cell holds 0.05, below the Limit of detection (0.1)",
+        "row 3, column H \"ST02\": Detection characterisation \"not detected\" instead of \"detected quantitatively\": the cell holds \"<LOD\"",
+        "row 4, column G \"ST01\": Detection characterisation \"detected qualitatively\" instead of \"not detected\": the cell holds \"X\", in a Peak Area row",
+        "row 5, column G \"ST01\": Detection characterisation \"detected qualitatively\" instead of \"not detected\": the cell holds \"X\", in a row without Concentration units, taken as Peak Area",
+        "row 6, column G \"ST01\": Detection characterisation \"detected quantitatively\" instead of \"not detected\": the cell holds 3, a count of items",
     ];
     assert_eq!(unpivoted.changes, expected);
 }

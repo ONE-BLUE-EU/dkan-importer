@@ -505,6 +505,11 @@ fn characterise(
             units,
         })
     };
+    // What the cell holds, as written: a number, or text in quotes
+    let holds = match result {
+        SampleResult::Number(_) => format!("the cell holds {raw}"),
+        SampleResult::Marker(_) => format!("the cell holds \"{raw}\""),
+    };
     match units {
         Units::NanogramsPerLitre => {
             if matches!(result, SampleResult::Marker(X_MARKER)) {
@@ -516,45 +521,42 @@ fn characterise(
             match result {
                 SampleResult::Number(n) if *n >= loq => characterised(
                     DETECTED_QUANTITATIVELY,
-                    format!("{n} is at least the {LOQ_FIELD} ({loq})"),
+                    format!("{holds}, at least the {LOQ_FIELD} ({loq})"),
                 ),
                 SampleResult::Number(n) if *n >= lod => characterised(
                     DETECTED_NOT_QUANTIFIED,
-                    format!("{n} is between the {LOD_FIELD} ({lod}) and the {LOQ_FIELD} ({loq})"),
+                    format!("{holds}, between the {LOD_FIELD} ({lod}) and the {LOQ_FIELD} ({loq})"),
                 ),
-                SampleResult::Number(n) => characterised(
+                SampleResult::Number(_) => characterised(
                     NOT_DETECTED,
-                    format!("{n} is below the {LOD_FIELD} ({lod})"),
+                    format!("{holds}, below the {LOD_FIELD} ({lod})"),
                 ),
-                SampleResult::Marker(LOD_MARKER) => {
-                    characterised(NOT_DETECTED, format!("the result is {LOD_MARKER}"))
-                }
-                SampleResult::Marker(LOQ_MARKER) => characterised(
-                    DETECTED_NOT_QUANTIFIED,
-                    format!("the result is {LOQ_MARKER}"),
-                ),
+                SampleResult::Marker(LOD_MARKER) => characterised(NOT_DETECTED, holds),
+                SampleResult::Marker(LOQ_MARKER) => characterised(DETECTED_NOT_QUANTIFIED, holds),
                 SampleResult::Marker(_) => unclassified(Some("ng/L".to_string())),
             }
         }
         Units::PeakArea => match result {
-            SampleResult::Marker(X_MARKER) => {
-                characterised(DETECTED_QUALITATIVELY, "X in a Peak Area row".to_string())
-            }
+            SampleResult::Marker(X_MARKER) => characterised(
+                DETECTED_QUALITATIVELY,
+                format!("{holds}, in a Peak Area row"),
+            ),
             SampleResult::Number(_) => Outcome::open(Question::NumberInPeakArea),
             SampleResult::Marker(_) => unclassified(Some("Peak Area".to_string())),
         },
         Units::Missing => match result {
             SampleResult::Marker(X_MARKER) => Outcome::Characterised {
                 detection: DETECTED_QUALITATIVELY,
-                reason: Question::EmptyUnitsTakenAsPeakArea.reason(),
+                reason: format!("{holds}, in a row without {UNITS_FIELD}, taken as Peak Area"),
                 question: Some(Question::EmptyUnitsTakenAsPeakArea),
             },
             _ => unclassified(None),
         },
         Units::Items => match result {
-            SampleResult::Number(n) if *n >= 0.0 && n.fract() == 0.0 => {
-                characterised(DETECTED_QUANTITATIVELY, "a count of items".to_string())
-            }
+            SampleResult::Number(n) if *n >= 0.0 && n.fract() == 0.0 => characterised(
+                DETECTED_QUANTITATIVELY,
+                format!("{holds}, a count of items"),
+            ),
             _ => Outcome::Open {
                 question: Question::ItemsNotWholeNumber,
                 reason: format!("\"{raw}\" is not a whole number of items"),

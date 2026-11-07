@@ -142,7 +142,7 @@ Each result's "Detection characterisation" is worked out from its row's "Concent
 | none | `X` | detected qualitatively (taken as Peak Area; the units stay empty) |
 | items | a whole number, 0 or more | detected quantitatively |
 
-- Where the result's characterisation differs from the sheet's own, the run log says so, with the reason: `row 2, column AQ "24019033": Detection characterisation "detected, not quantified" instead of "detected quantitatively": the result is <LOQ`.
+- Where the result's characterisation differs from the sheet's own, the run log says so, with the reason, starting with what the cell holds as written (a number, or text in quotes): `row 2, column AQ "24019033": Detection characterisation "detected, not quantified" instead of "detected quantitatively": the cell holds "<LOQ"`, or `...: the cell holds 0.05, below the Limit of detection (0.1)`.
 - Rows in ng/mL (matched ignoring case and spaces) are skipped: only ng/L is imported. Sheets keep them beside the ng/L rows calculated from them by formulas, which the importer reads as the values Excel saved, so the source file needs no change. Each ng/mL row's values must be in an ng/L row of the sheet: the same text (ignoring case and spaces), and its numbers x1000 in the limits and the sample columns, to 6 significant digits. Where the ng/mL row is blank or holds an Excel error, the ng/L row may hold anything (such as a Classification). The summary counts the skipped rows, and the run log lists each, with its ng/L row:
 
   ```
