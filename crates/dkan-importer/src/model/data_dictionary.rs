@@ -2,7 +2,7 @@ use excel_core::anyhow;
 use excel_core::reqwest::blocking::Client;
 use excel_core::serde_json;
 use excel_core::serde_json::{Value, json};
-use excel_core::utils::{normalize_string, write_error_to_log};
+use excel_core::utils::normalize_string;
 use std::collections::HashMap;
 
 pub struct DataDictionary {
@@ -448,17 +448,6 @@ impl DataDictionary {
                     .collect::<Vec<_>>()
                     .join("\n")
             );
-
-            // Write duplicate check errors to the log file
-            if let Err(e) =
-                write_error_to_log("Data Dictionary Duplicate Check Error", &full_message)
-            {
-                return Err(anyhow::anyhow!(
-                    "{}\n(The error log could not be written: {})",
-                    full_message,
-                    e
-                ));
-            }
 
             Err(anyhow::anyhow!(full_message))
         }

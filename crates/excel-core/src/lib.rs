@@ -20,8 +20,7 @@ pub mod test_utils;
 pub use excel_validator::{
     Change, Closest, Counterpart, DEFAULT_MARKER_LIMITS, DEFAULT_VALUES_MARKERS, DETECTION_FIELD,
     Difference, ExcelValidator, ExcelValidatorBuilder, FieldSchema, IDENTIFICATION_LEVEL,
-    IDENTIFICATION_LEVEL_FIELD, LOD_FIELD, LOQ_FIELD, MarkerLimit, NgPerMlRow, Question,
-    SchemaType, SheetCell, SkipReason, UNITS_FIELD, Unpivot, parse_values_marker,
+    IDENTIFICATION_LEVEL_FIELD, InvalidRows, LOD_FIELD, LOQ_FIELD, MarkerLimit, NgPerMlRow,
+    Question, RowsRefused, SchemaType, SheetCell, SkipReason, UNITS_FIELD, Unpivot,
+    parse_values_marker,
 };
-
-pub const ERRORS_LOG_FILE: &str = "errors.log";

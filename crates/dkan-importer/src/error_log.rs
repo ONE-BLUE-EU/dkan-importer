@@ -1,23 +1,23 @@
+//! The error log: the details of what stopped a run, such as every row failing validation, too
+//! many to print. Entries are appended, each stamped with the time it was written.
+
+use excel_core::utils::get_utc_iso_datetime;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 
-use crate::ERRORS_LOG_FILE;
-use crate::utils::get_utc_iso_datetime;
+/// The error log, in the directory the importer runs in
+pub const ERRORS_LOG_FILE: &str = "errors.log";
 
-/// Centralized function to write error messages to the errors log file
+/// Append `error_message` under the heading `error_type` to the error log at `path`, creating it.
 ///
 /// Returns an error if the log cannot be written, so callers never point the user at a log that
 /// does not contain the details.
-///
-/// # Arguments
-/// * `error_type` - A description of the error type/category (e.g., "Data Dictionary Duplicate Check Error")
-/// * `error_message` - The actual error message content
-pub fn write_error_to_log(error_type: &str, error_message: &str) -> std::io::Result<()> {
-    append_error_to_log(Path::new(ERRORS_LOG_FILE), error_type, error_message)
-}
-
-fn append_error_to_log(path: &Path, error_type: &str, error_message: &str) -> std::io::Result<()> {
+pub fn append_error_to_log(
+    path: &Path,
+    error_type: &str,
+    error_message: &str,
+) -> std::io::Result<()> {
     let timestamp = get_utc_iso_datetime();
     let log_entry = format!("\n[{}] {}:\n{}\n", timestamp, error_type, error_message);
 

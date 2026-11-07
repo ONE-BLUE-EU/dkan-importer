@@ -329,3 +329,90 @@ fn excel_error_cells_name_the_row_excel_shows_when_the_table_is_not_at_row_1() {
         "{error_cells:?}"
     );
 }
+
+/// Validate `all_rows` (the first row being the headers) and return why the rows are refused.
+fn refusal(name: &str, all_rows: &[Vec<common::Cell>]) -> excel_core::RowsRefused {
+    let xlsx = write_test_workbook(name, all_rows);
+    let mut validator =
+        ExcelValidatorBuilder::new(xlsx.to_str().unwrap(), "Sheet1", sample_schema())
+            .build()
+            .unwrap_or_else(|e| panic!("the rows must not stop the build: {e:#}"));
+    let _ = std::fs::remove_file(&xlsx);
+    validator
+        .validate_excel()
+        .expect_err("the rows must be refused")
+}
+
+/// The core writes no file: the rows failing validation come back with their report, for the
+/// caller to write to the error log.
+#[test]
+fn rows_failing_validation_are_returned_with_their_report_for_the_error_log() {
+    let mut rows = vec![headers()];
+    rows.push(vec![Text("S1"), Empty, Number(3.0), Empty, Empty]);
+    rows.push(vec![Text("S2"), Empty, Text("three"), Empty, Empty]);
+
+    let refused = refusal("refused-invalid-rows", &rows);
+
+    assert_eq!(refused.problems, Vec::<String>::new());
+    let invalid = refused
+        .invalid_rows
+        .as_ref()
+        .expect("row 3 must fail validation");
+    let expected = "Excel validation failed with 1 error(s) across 1 row(s).";
+    assert_eq!(invalid.summary, expected);
+    assert!(
+        invalid.report.contains("Row 3: 1 error(s)\n"),
+        "{}",
+        invalid.report
+    );
+    assert!(!invalid.report.contains("Row 2:"), "{}", invalid.report);
+    // The error log stamps each entry; the report has no clock of its own
+    assert!(
+        !invalid.report.contains("Generated at"),
+        "{}",
+        invalid.report
+    );
+    assert_eq!(refused.to_string(), expected);
+}
+
+#[test]
+fn problems_without_invalid_rows_have_no_report_for_the_error_log() {
+    let rows = vec![
+        vec![Text("Sample ID"), Empty],
+        vec![Text("S1"), Text("stray")],
+    ];
+
+    let refused = refusal("refused-problems-only", &rows);
+
+    assert_eq!(refused.problems.len(), 1, "{:?}", refused.problems);
+    assert!(refused.invalid_rows.is_none());
+    assert_eq!(refused.to_string(), refused.problems.join("\n"));
+}
+
+#[test]
+fn problems_and_invalid_rows_are_reported_together_problems_first() {
+    let rows = vec![
+        vec![Text("Sample ID"), Text("Count"), Empty],
+        vec![Text("S1"), Text("three"), Text("stray")],
+    ];
+
+    let refused = refusal("refused-both", &rows);
+
+    let invalid = refused
+        .invalid_rows
+        .as_ref()
+        .expect("row 2 must fail validation");
+    let expected = format!("{}\n{}", refused.problems.join("\n"), invalid.summary);
+    assert_eq!(refused.to_string(), expected);
+}
+
+#[test]
+fn a_sheet_without_rows_is_refused_as_empty() {
+    let refused = refusal("refused-empty", &[headers()]);
+
+    assert_eq!(
+        refused.problems,
+        vec!["The Excel file is empty".to_string()]
+    );
+    assert!(refused.invalid_rows.is_none());
+}

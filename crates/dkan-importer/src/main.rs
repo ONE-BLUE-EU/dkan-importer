@@ -5,6 +5,7 @@
 
 use clap::Parser;
 use dkan_importer::{
+    error_log::{ERRORS_LOG_FILE, append_error_to_log},
     model::DataDictionary,
     run_log::{RunLog, changes_lines, ng_per_ml_rows_lines, questions_lines},
     utils::{
@@ -305,8 +306,25 @@ fn run(
         ))?;
         log.notes(&questions_lines(questions))?;
     }
-    // The error says whether the details are in the error log or in the message itself
-    validator.validate_excel()?;
+    if let Err(refused) = validator.validate_excel() {
+        let mut message = refused.to_string();
+        if let Some(invalid) = &refused.invalid_rows {
+            // If the log cannot be written, carry the details in the error itself rather than
+            // pointing the user at a log that lacks them
+            match append_error_to_log(
+                std::path::Path::new(ERRORS_LOG_FILE),
+                "Excel Validation Error Report",
+                &invalid.report,
+            ) {
+                Ok(()) => message.push_str(" Check the error log for details."),
+                Err(e) => message.push_str(&format!(
+                    " The error log could not be written ({e}), so the details follow:\n{}",
+                    invalid.report
+                )),
+            }
+        }
+        return Err(message.into());
+    }
     log.info("✅ Validation completed!")?;
 
     // Create a csv since the validation is successful. Use schema-aware parsing for proper date formatting.

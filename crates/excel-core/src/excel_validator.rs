@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroUsize;
 use thiserror::Error;
 
-use crate::utils::{normalize_string, write_error_to_log};
+use crate::utils::normalize_string;
 
 /// Written in place of an empty Number cell in the exported CSV.
 ///
@@ -607,6 +607,44 @@ struct ProcessedSheet {
     values_markers: Option<ValuesMarkers>,
 }
 
+/// Why the rows read cannot be imported. Its message lists the problems, then the summary of the
+/// rows failing validation, whose report is for the error log.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RowsRefused {
+    /// What to correct in the source file, each a message listing its cells, in a fixed order
+    pub problems: Vec<String>,
+    /// The rows failing validation, when any do
+    pub invalid_rows: Option<InvalidRows>,
+}
+
+/// The rows failing validation
+#[derive(Debug, Clone, PartialEq)]
+pub struct InvalidRows {
+    /// How many errors in how many rows, for the terminal
+    pub summary: String,
+    /// Every failing row with its data and errors, for the error log
+    pub report: String,
+}
+
+impl std::fmt::Display for RowsRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let lines = self.problems.iter().map(String::as_str).chain(
+            self.invalid_rows
+                .as_ref()
+                .map(|invalid| invalid.summary.as_str()),
+        );
+        for (index, line) in lines.enumerate() {
+            if index > 0 {
+                f.write_str("\n")?;
+            }
+            f.write_str(line)?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for RowsRefused {}
+
 #[derive(Error, Debug, Clone)]
 pub enum ValidationError {
     #[error("Type mismatch at {path}: expected {expected}, got {actual} \"{value}\"")]
@@ -1133,15 +1171,18 @@ impl ExcelValidator {
         &self.field_schemas
     }
 
-    pub fn validate_excel(&mut self) -> Result<()> {
+    /// Validate every row against the schema. Refused when any row fails, or the rows read have
+    /// problems to correct in the source, or there are no rows.
+    pub fn validate_excel(&mut self) -> std::result::Result<(), RowsRefused> {
         // What stops the run in the rows read: reported with the validation errors, not instead
-        let problems = self.problems.join("\n");
-        let row_count = self.rows.len();
-        if row_count == 0 {
-            return Err(if problems.is_empty() {
-                anyhow::anyhow!("The Excel file is empty")
-            } else {
-                anyhow::anyhow!("{problems}")
+        let mut problems = self.problems.clone();
+        if self.rows.is_empty() {
+            if problems.is_empty() {
+                problems.push("The Excel file is empty".to_string());
+            }
+            return Err(RowsRefused {
+                problems,
+                invalid_rows: None,
             });
         }
 
@@ -1160,40 +1201,24 @@ impl ExcelValidator {
             }
         }
 
-        // Log validation errors using centralized logging if there are any errors
-        if !self.validation_reports.is_empty() {
-            let validation_report = self.format_validation_report();
-            let summary = format!(
+        let invalid_rows = (!self.validation_reports.is_empty()).then(|| InvalidRows {
+            summary: format!(
                 "Excel validation failed with {} error(s) across {} row(s).",
                 self.validation_reports
                     .iter()
                     .map(|r| r.errors.len())
-                    .sum::<usize>(),
+                    .fold(0_usize, usize::saturating_add),
                 self.validation_reports.len()
-            );
-
-            // Return error if validation failed. If the log cannot be written, carry the details
-            // in the error itself rather than pointing the user at a log that lacks them.
-            let validation = match write_error_to_log(
-                "Excel Validation Error Report",
-                &validation_report,
-            ) {
-                Ok(()) => format!("{summary} Check the error log for details."),
-                Err(e) => format!(
-                    "{summary} The error log could not be written ({e}), so the details follow:\n{validation_report}"
-                ),
-            };
-            return Err(if problems.is_empty() {
-                anyhow::anyhow!("{validation}")
-            } else {
-                anyhow::anyhow!("{problems}\n{validation}")
-            });
+            ),
+            report: self.format_validation_report(),
+        });
+        if problems.is_empty() && invalid_rows.is_none() {
+            return Ok(());
         }
-
-        if !problems.is_empty() {
-            return Err(anyhow::anyhow!("{problems}"));
-        }
-        Ok(())
+        Err(RowsRefused {
+            problems,
+            invalid_rows,
+        })
     }
 
     /// Validate that files referenced in specified columns exist in the filesystem
@@ -2220,10 +2245,6 @@ impl ExcelValidator {
 
         // Add title and separator
         report.push_str("=============================\n");
-
-        // Generate ISO 8601 formatted timestamp
-        let now = crate::utils::get_utc_iso_datetime();
-        report.push_str(&format!("Generated at: {}\n\n", now));
 
         // Add total error count
         report.push_str(&format!(
@@ -3434,16 +3455,6 @@ impl ExcelValidator {
                     .collect::<Vec<_>>()
                     .join("\n")
             );
-
-            // Write duplicate check errors to the log file
-            if let Err(e) = write_error_to_log("Excel Header Duplicate Check Error", &full_message)
-            {
-                return Err(anyhow::anyhow!(
-                    "{}\n(The error log could not be written: {})",
-                    full_message,
-                    e
-                ));
-            }
 
             Err(anyhow::anyhow!(full_message))
         }

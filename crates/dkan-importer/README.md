@@ -263,17 +263,18 @@ Rows that fail validation are not changes: they are listed in `errors.log`.
 Problems that must be corrected in the source file (an Identification Level that is not `2A`, an ng/mL row whose values no ng/L row holds, data in a column without a header) stop the run only once every row has been read. So one run reports all of them together, after the summary, the changes and the questions, and nothing is written or uploaded.
 
 ### Error Log File
-The application creates an `errors.log` file containing:
-- Timestamp of validation run
+When rows fail validation, the run appends an entry to `errors.log`, in the directory it runs in, containing:
+- The time the entry was written (UTC)
 - Total count of rows with errors
 - Detailed error information for each failed row
 - Complete row data for debugging
 
-Example error log:
+If `errors.log` cannot be written, the details are printed with the error instead. Other errors, such as duplicate headers, are printed and kept in the run log only.
+
+Example entry:
 ```
-Excel Validation Error Report
+[2024-01-15T10:30:45.123456789+00:00] Excel Validation Error Report:
 =============================
-Generated at: 2024-01-15 10:30:45
 
 Total rows with errors: 1
 
