@@ -2,5 +2,7 @@
 data/
 *.run.log
 *.error.log
+*.run.txt
+*.error.txt
 # The CSV file each run saves beside its run log
 /*.csv

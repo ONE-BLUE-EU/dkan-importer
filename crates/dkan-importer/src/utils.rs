@@ -38,8 +38,8 @@ impl RunFiles {
         let stem = format!("{start}{dataset_id}_{timestamp}{merged}").to_lowercase();
         RunFiles {
             csv: format!("{stem}.csv"),
-            log: format!("{stem}.run.log"),
-            errors: format!("{stem}.error.log"),
+            log: format!("{stem}.run.txt"),
+            errors: format!("{stem}.error.txt"),
         }
     }
 }
@@ -83,8 +83,8 @@ mod tests {
         );
 
         let expected_csv = "test_sheet_with_spaces_1234567890_2026-11-05_10-00-00.csv";
-        let expected_log = "test_sheet_with_spaces_1234567890_2026-11-05_10-00-00.run.log";
-        let expected_errors = "test_sheet_with_spaces_1234567890_2026-11-05_10-00-00.error.log";
+        let expected_log = "test_sheet_with_spaces_1234567890_2026-11-05_10-00-00.run.txt";
+        let expected_errors = "test_sheet_with_spaces_1234567890_2026-11-05_10-00-00.error.txt";
         assert_eq!(files.csv, expected_csv);
         assert_eq!(files.log, expected_log);
         assert_eq!(files.errors, expected_errors);
@@ -104,8 +104,8 @@ mod tests {
         );
 
         let expected_csv = "analytical_results_ds-1_2026-11-05_10-00-00_3_merged.csv";
-        let expected_log = "analytical_results_ds-1_2026-11-05_10-00-00_3_merged.run.log";
-        let expected_errors = "analytical_results_ds-1_2026-11-05_10-00-00_3_merged.error.log";
+        let expected_log = "analytical_results_ds-1_2026-11-05_10-00-00_3_merged.run.txt";
+        let expected_errors = "analytical_results_ds-1_2026-11-05_10-00-00_3_merged.error.txt";
         assert_eq!(files.csv, expected_csv);
         assert_eq!(files.log, expected_log);
         assert_eq!(files.errors, expected_errors);
@@ -144,17 +144,17 @@ mod tests {
 
         let expected = vec![
             "analytical_results_(air)_ds-1_2026-11-01_09-00-00.csv",
-            "analytical_results_(air)_ds-1_2026-11-01_09-00-00.run.log",
+            "analytical_results_(air)_ds-1_2026-11-01_09-00-00.run.txt",
             "analytical_results_(air)_ds-1_2026-11-02_09-00-00.csv",
-            "analytical_results_(air)_ds-1_2026-11-02_09-00-00.run.log",
+            "analytical_results_(air)_ds-1_2026-11-02_09-00-00.run.txt",
             "analytical_results_(air)_ds-2_2026-11-01_09-00-00.csv",
-            "analytical_results_(air)_ds-2_2026-11-01_09-00-00.run.log",
+            "analytical_results_(air)_ds-2_2026-11-01_09-00-00.run.txt",
             "analytical_results_ds-1_2026-11-01_10-00-00_2_merged.csv",
-            "analytical_results_ds-1_2026-11-01_10-00-00_2_merged.run.log",
+            "analytical_results_ds-1_2026-11-01_10-00-00_2_merged.run.txt",
             "analytical_results_ds-1_2026-11-03_09-00-00_2_merged.csv",
-            "analytical_results_ds-1_2026-11-03_09-00-00_2_merged.run.log",
+            "analytical_results_ds-1_2026-11-03_09-00-00_2_merged.run.txt",
             "analytical_results_ds-2_2026-11-01_08-00-00_2_merged.csv",
-            "analytical_results_ds-2_2026-11-01_08-00-00_2_merged.run.log",
+            "analytical_results_ds-2_2026-11-01_08-00-00_2_merged.run.txt",
         ];
         assert_eq!(names, expected);
     }

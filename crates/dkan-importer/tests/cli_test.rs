@@ -323,7 +323,7 @@ fn a_failed_run_leaves_a_run_log_with_the_error_and_without_the_password() {
     // Named like the CSV file of the same run: <sheet>_<dataset>_<YYYY-MM-DD_HH-MM-SS>
     let timestamp = name
         .strip_prefix("analytical_results_(i)_some-dataset_")
-        .and_then(|rest| rest.strip_suffix(".run.log"))
+        .and_then(|rest| rest.strip_suffix(".run.txt"))
         .unwrap_or_else(|| panic!("unexpected run log name {name}"));
     assert_eq!(timestamp.len(), "2026-11-05_10-00-00".len(), "{name}");
     let log = std::fs::read_to_string(&log_path).unwrap();
@@ -376,7 +376,7 @@ fn a_repeated_sheet_name_names_the_run_log_after_the_merge() {
     let name = log_path.file_name().unwrap().to_string_lossy().to_string();
     let timestamp = name
         .strip_prefix("analytical_results_some-dataset_")
-        .and_then(|rest| rest.strip_suffix("_2_merged.run.log"))
+        .and_then(|rest| rest.strip_suffix("_2_merged.run.txt"))
         .unwrap_or_else(|| panic!("unexpected run log name {name}"));
     assert_eq!(timestamp.len(), "2026-11-05_10-00-00".len(), "{name}");
     let log = std::fs::read_to_string(&log_path).unwrap();
@@ -407,7 +407,7 @@ fn a_sheet_name_given_twice_is_refused() {
                 .unwrap()
                 .path()
                 .to_string_lossy()
-                .ends_with(".run.log")
+                .ends_with(".run.txt")
         })
         .count();
     assert_eq!(logs, 0);
@@ -419,7 +419,7 @@ fn the_run_log_in(dir: &Path) -> PathBuf {
     let logs: Vec<PathBuf> = std::fs::read_dir(dir)
         .unwrap()
         .map(|entry| entry.unwrap().path())
-        .filter(|path| path.to_string_lossy().ends_with(".run.log"))
+        .filter(|path| path.to_string_lossy().ends_with(".run.txt"))
         .collect();
     match logs.as_slice() {
         [log] => log.clone(),

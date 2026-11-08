@@ -287,7 +287,7 @@ Example Excel structure:
   The CSV file is saved in the current directory, beside the run log, before it is uploaded under the same name, so the file sent is kept even when the upload fails. A run that stops ends instead with `❌ CSV file not generated` and `❌ Nothing uploaded`; one that stops later says how far it got: the CSV generated but not saved (`❌ CSV file generated (3312 row(s)), but not saved as ...`, and nothing uploaded), saved but not uploaded (`❌ Nothing uploaded`), uploaded to its URL but not added to the dataset (`❌ Uploaded ... to <url>, but not added to dataset ...`), or added in place of a distribution whose file could not be deleted (`⚠️  Uploaded ..., replacing old.csv, whose file could not be deleted`). When it replaces one, the line says so: `..., replacing old.csv, whose file was deleted`.
 
 ### Run Log File
-Every run writes a log in the current directory, named exactly like the run's CSV file but ending in `.run.log`: `<sheet>_<dataset>_<YYYY-MM-DD_HH-MM-SS>.run.log`, lowercase, with the sheet name's spaces as `_`, as in `analytical_results_(i)_some-dataset_2026-11-05_10-00-00.run.log` (for a merge, see [CSV Output](#csv-output)). Each run writes its own log; the newest describes the latest run. It is written even when the run stops, and never contains the password. It holds:
+Every run writes a log in the current directory, named exactly like the run's CSV file but ending in `.run.txt`: `<sheet>_<dataset>_<YYYY-MM-DD_HH-MM-SS>.run.txt`, lowercase, with the sheet name's spaces as `_`, as in `analytical_results_(i)_some-dataset_2026-11-05_10-00-00.run.txt` (for a merge, see [CSV Output](#csv-output)). Each run writes its own log; the newest describes the latest run. It is written even when the run stops, and never contains the password. It holds:
 - First, what the run was given, with the dataset's and the data dictionary's names (their titles in DKAN, read once the login is accepted), then two blank lines:
 
   ```
@@ -319,7 +319,7 @@ Rows that fail validation are not changes: they are listed in the run's error lo
 Problems that must be corrected in the source file (an Identification Level that is not a number, data in a column without a header) stop the run only once every row has been read. So one run reports all of them together, after the summary, the changes and the questions, and nothing is written or uploaded.
 
 ### Error Log File
-When rows fail validation, the run writes its error log, `<sheet>_<dataset>_<YYYY-MM-DD_HH-MM-SS>.error.log`, beside its run log and named like it (see [CSV Output](#csv-output)), with one entry per sheet refused, containing:
+When rows fail validation, the run writes its error log, `<sheet>_<dataset>_<YYYY-MM-DD_HH-MM-SS>.error.txt`, beside its run log and named like it (see [CSV Output](#csv-output)), with one entry per sheet refused, containing:
 - The time the entry was written (UTC)
 - The top of the run log: the Excel file, each sheet, the dataset and the data dictionary, each with its name and ID
 - Total count of rows with errors
@@ -360,7 +360,7 @@ Valid data is saved to a CSV file in the current directory, beside the run log, 
 <sheet>_<dataset>_<YYYY-MM-DD_HH-MM-SS>.csv
 ```
 
-What changes least often comes first, so that, sorted by name, the files group by sheet, then by dataset, each group in time order, with each CSV file beside its run log and, if rows failed validation, its error log (`.error.log`).
+What changes least often comes first, so that, sorted by name, the files group by sheet, then by dataset, each group in time order, with each CSV file beside its run log and, if rows failed validation, its error log (`.error.txt`).
 
 A run merging `n` sheets has `<words>` in place of `<sheet>`, the whole words every sheet name starts with (left out if there are none), and ends in `_<n>_merged`, so that merges into a dataset group together in time order, however many sheets each merged. Merging "Analytical results (Air)" and "Analytical results (Sediment)" gives:
 ```

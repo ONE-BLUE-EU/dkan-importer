@@ -7,3 +7,5 @@ tmp.txt
 *.csv
 *.run.log
 *.error.log
+*.run.txt
+*.error.txt
