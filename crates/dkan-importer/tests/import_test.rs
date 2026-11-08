@@ -505,6 +505,9 @@ fn rows_failing_validation_go_to_the_error_log_and_nothing_is_uploaded() {
         panic!("one entry expected: {:?}", outcome.error_log);
     };
     assert_eq!(title, VALIDATION_REPORT_TITLE);
+    // Headed like the run log, so the entry names the run it comes from
+    let expected_start = format!("{}=====", header_with_names());
+    assert!(report.starts_with(&expected_start), "{report}");
     assert!(report.contains("Row 3: 1 error(s)\n"), "{report}");
     assert!(report.contains("\"deep\""), "{report}");
     assert!(
@@ -905,6 +908,14 @@ Sheet \"Air\": Excel validation failed with 1 error(s) across 1 row(s). Check th
         .iter()
         .map(|(_, report)| report.as_str())
         .collect();
+    // Each sheet's entry headed like the run log, naming every sheet of the run
+    let expected_header = header_with_names().replace(
+        "Excel sheet: Sheet1\n",
+        "Excel sheet: Water\nExcel sheet: Air\n",
+    );
+    for report in &reports {
+        assert!(report.starts_with(&expected_header), "{report}");
+    }
     assert!(reports[0].contains("Row 3: 1 error(s)\n"), "{reports:?}");
     assert!(reports[1].contains("Row 2: 1 error(s)\n"), "{reports:?}");
     assert_eq!(

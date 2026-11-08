@@ -1,13 +1,11 @@
 //! The error log: the details of what stopped a run, such as every row failing validation, too
-//! many to print. Entries are appended, each stamped with the time it was written.
+//! many to print. Named like the run's other files (see [`crate::utils::RunFiles`]); entries are
+//! appended, one per sheet refused, each stamped with the time it was written.
 
 use excel_core::utils::get_utc_iso_datetime;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
-
-/// The error log, in the directory the importer runs in
-pub const ERRORS_LOG_FILE: &str = "errors.log";
 
 /// Append `error_message` under the heading `error_type` to the error log at `path`, creating it.
 ///

@@ -295,7 +295,8 @@ fn steps<E: Environment, L: Write, O: Write, R: Write>(
         ),
         Err(_) => (&not_reached(), not_reached()),
     };
-    log.notes(&header(import, dataset_name, &dictionary_name))?;
+    let top = header(import, dataset_name, &dictionary_name);
+    log.notes(&top)?;
 
     let Reached {
         dkan,
@@ -349,7 +350,7 @@ fn steps<E: Environment, L: Write, O: Write, R: Write>(
                     sheet.sheet_name()
                 ),
             };
-            let message = refusal_message(environment, &title, &refused);
+            let message = refusal_message(environment, &title, &top, &refused);
             refusals.push(match merged {
                 None => message,
                 Some(_) => format!("Sheet \"{}\": {message}", sheet.sheet_name()),
@@ -427,16 +428,19 @@ fn log_sheet<L: Write, O: Write, R: Write>(
 }
 
 /// The message of `refused`, its report of the rows failing validation, if any, appended to the
-/// error log under `title`. If the log cannot be written, the message carries the report rather
-/// than pointing the user at a log that lacks it.
+/// error log under `title`, after `top`, the top of the run log, so the entry names its run. If
+/// the log cannot be written, the message carries the report rather than pointing the user at a
+/// log that lacks it.
 fn refusal_message<E: Environment>(
     environment: &mut E,
     title: &str,
+    top: &[String],
     refused: &RowsRefused,
 ) -> String {
     let mut message = refused.to_string();
     if let Some(invalid) = &refused.invalid_rows {
-        match environment.append_error_log(title, &invalid.report) {
+        let entry = format!("{}\n{}", top.join("\n"), invalid.report);
+        match environment.append_error_log(title, &entry) {
             Ok(()) => message.push_str(" Check the error log for details."),
             Err(e) => message.push_str(&format!(
                 " The error log could not be written ({e}), so the details follow:\n{}",

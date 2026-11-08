@@ -1,7 +1,8 @@
 use crate::import::SheetNames;
 use excel_core::utils::{get_local_datetime_with_format, normalize_string};
 
-/// The files a run writes, named alike so they sort together:
+/// The files a run writes (the CSV file, the run log and the error log), named alike so they sort
+/// together:
 /// `<sheet>_<dataset>_<YYYY-MM-DD_HH-MM-SS>`, lowercase, with the sheet name's spaces as `_`.
 /// What changes least often comes first, so that sorted by name the files group by sheet, then
 /// by dataset, each group in time order. A run merging `n` sheets has `<words>` in place of
@@ -12,6 +13,8 @@ pub struct RunFiles {
     pub csv: String,
     /// The run log; see [`crate::run_log`]
     pub log: String,
+    /// The error log, written only when rows fail validation; see [`crate::error_log`]
+    pub errors: String,
 }
 
 impl RunFiles {
@@ -36,6 +39,7 @@ impl RunFiles {
         RunFiles {
             csv: format!("{stem}.csv"),
             log: format!("{stem}.run.log"),
+            errors: format!("{stem}.error.log"),
         }
     }
 }
@@ -71,7 +75,7 @@ mod tests {
     }
 
     #[test]
-    fn the_run_log_is_named_like_the_csv_file_of_the_same_run() {
+    fn the_run_log_and_the_error_log_are_named_like_the_csv_file_of_the_same_run() {
         let files = RunFiles::at(
             "1234567890",
             &sheets(&["Test Sheet with Spaces"]),
@@ -80,8 +84,10 @@ mod tests {
 
         let expected_csv = "test_sheet_with_spaces_1234567890_2026-11-05_10-00-00.csv";
         let expected_log = "test_sheet_with_spaces_1234567890_2026-11-05_10-00-00.run.log";
+        let expected_errors = "test_sheet_with_spaces_1234567890_2026-11-05_10-00-00.error.log";
         assert_eq!(files.csv, expected_csv);
         assert_eq!(files.log, expected_log);
+        assert_eq!(files.errors, expected_errors);
     }
 
     /// Named by the words the sheet names share, and how many sheets are merged
@@ -99,8 +105,10 @@ mod tests {
 
         let expected_csv = "analytical_results_ds-1_2026-11-05_10-00-00_3_merged.csv";
         let expected_log = "analytical_results_ds-1_2026-11-05_10-00-00_3_merged.run.log";
+        let expected_errors = "analytical_results_ds-1_2026-11-05_10-00-00_3_merged.error.log";
         assert_eq!(files.csv, expected_csv);
         assert_eq!(files.log, expected_log);
+        assert_eq!(files.errors, expected_errors);
     }
 
     #[test]

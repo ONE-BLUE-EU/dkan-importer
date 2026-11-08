@@ -6,7 +6,7 @@
 use clap::Parser;
 use dkan_importer::{
     dkan::{HttpDkan, HttpsUrl},
-    error_log::{ERRORS_LOG_FILE, append_error_to_log},
+    error_log::append_error_to_log,
     import::{Environment, Import, SheetNames, run},
     run_log::RunLog,
     utils::RunFiles,
@@ -129,7 +129,7 @@ struct Args {
     /// non-blank sample cell must be a number or one of these markers (ignoring
     /// case and surrounding spaces; markers are written uppercase, so <lod is
     /// uploaded as <LOD). Anything else is a validation error, listed with its
-    /// row in errors.log.
+    /// row in the run's error log.
     ///
     /// Giving markers replaces the default ones; list all you need after one
     /// flag. A sample cell holding NS (no sample), or ND (treated as NS), gives
@@ -250,6 +250,7 @@ fn main() -> ExitCode {
     };
     let mut environment = Terminal {
         password: arguments.password,
+        errors_log: files.errors,
     };
 
     let log_path = files.log;
@@ -276,6 +277,8 @@ fn main() -> ExitCode {
 struct Terminal {
     /// The password given with --password, if any; asked for otherwise
     password: Option<String>,
+    /// The run's error log; see [`RunFiles`]
+    errors_log: String,
 }
 
 impl Environment for Terminal {
@@ -299,6 +302,6 @@ impl Environment for Terminal {
     }
 
     fn append_error_log(&mut self, title: &str, details: &str) -> io::Result<()> {
-        append_error_to_log(Path::new(ERRORS_LOG_FILE), title, details)
+        append_error_to_log(Path::new(&self.errors_log), title, details)
     }
 }

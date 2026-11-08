@@ -94,7 +94,7 @@ Okadaic acid   | ST02_Surface | 0.40
 - `--headers-column` and `--values-column` are only accepted with `--unpivot`, and `--unpivot` needs `--headers-column`. Both must be data dictionary fields that are not columns in the sheet. Otherwise the run stops and lists the fields that can be used.
 - The run also stops, before anything is written or uploaded, if the sheet does not start with data dictionary fields, has no sample columns, or has a data dictionary field among the sample columns.
 - Before validating, it prints what it will do, for example: `Keeping 9 column(s) A-I (Anal. Method Serial No. … Limit of quantification); unpivoting 74 column(s) J-CE (ST01_Surface … ST41_Bottom) into Sample Tag / Concentration: 518 row(s); 4 blank sample cell(s) skipped.` The blank cells are only mentioned when there are some.
-- Validation errors name the source row. The row data in `errors.log` includes the sample column's header.
+- Validation errors name the source row. The row data in the error log includes the sample column's header.
 
 #### Markers instead of numbers
 
@@ -314,22 +314,31 @@ Every line naming a cell gives its value the same way: text in quotes, exactly a
 
 Blank sample cells are not listed, as a sheet has thousands: the summary line counts them.
 
-Rows that fail validation are not changes: they are listed in `errors.log`.
+Rows that fail validation are not changes: they are listed in the run's error log.
 
 Problems that must be corrected in the source file (an Identification Level that is not a number, data in a column without a header) stop the run only once every row has been read. So one run reports all of them together, after the summary, the changes and the questions, and nothing is written or uploaded.
 
 ### Error Log File
-When rows fail validation, the run appends an entry to `errors.log`, in the directory it runs in, containing:
+When rows fail validation, the run writes its error log, `<sheet>_<dataset>_<YYYY-MM-DD_HH-MM-SS>.error.log`, beside its run log and named like it (see [CSV Output](#csv-output)), with one entry per sheet refused, containing:
 - The time the entry was written (UTC)
+- The top of the run log: the Excel file, each sheet, the dataset and the data dictionary, each with its name and ID
 - Total count of rows with errors
 - Detailed error information for each failed row
 - Complete row data for debugging
 
-If `errors.log` cannot be written, the details are printed with the error instead. Other errors, such as duplicate headers, are printed and kept in the run log only.
+If the error log cannot be written, the details are printed with the error instead. Other errors, such as duplicate headers, are printed and kept in the run log only.
 
 Example entry:
 ```
 [2024-01-15T10:30:45.123456789+00:00] Excel Validation Error Report:
+Excel file: samples.xlsx
+Excel sheet: Sheet1
+Dataset Name: Iberian Peninsula - Atlantic Ocean - 2026
+Dataset ID: ce6d5e1b-4367-4c54-a295-46b765e40a5e
+Dictionary Name: Analytical results
+Dictionary ID: 6bc71c4e-a63b-436b-98c1-b74363fb482e
+
+
 =============================
 
 Total rows with errors: 1
@@ -351,7 +360,7 @@ Valid data is saved to a CSV file in the current directory, beside the run log, 
 <sheet>_<dataset>_<YYYY-MM-DD_HH-MM-SS>.csv
 ```
 
-What changes least often comes first, so that, sorted by name, the files group by sheet, then by dataset, each group in time order, with each CSV file beside its run log.
+What changes least often comes first, so that, sorted by name, the files group by sheet, then by dataset, each group in time order, with each CSV file beside its run log and, if rows failed validation, its error log (`.error.log`).
 
 A run merging `n` sheets has `<words>` in place of `<sheet>`, the whole words every sheet name starts with (left out if there are none), and ends in `_<n>_merged`, so that merges into a dataset group together in time order, however many sheets each merged. Merging "Analytical results (Air)" and "Analytical results (Sediment)" gives:
 ```
