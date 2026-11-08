@@ -317,10 +317,10 @@ fn a_failed_run_leaves_a_run_log_with_the_error_and_without_the_password() {
     assert_eq!(output.status.code(), expected_exit_code, "{stderr}");
     let log_path = the_run_log_in(&dir);
     let name = log_path.file_name().unwrap().to_string_lossy().to_string();
-    // Named like the CSV file of the same run: <sheet>_<YYYY-MM-DD_HH-MM-SS>_<dataset>
+    // Named like the CSV file of the same run: <sheet>_<dataset>_<YYYY-MM-DD_HH-MM-SS>
     let timestamp = name
-        .strip_prefix("analytical_results_(i)_")
-        .and_then(|rest| rest.strip_suffix("_some-dataset.run.log"))
+        .strip_prefix("analytical_results_(i)_some-dataset_")
+        .and_then(|rest| rest.strip_suffix(".run.log"))
         .unwrap_or_else(|| panic!("unexpected run log name {name}"));
     assert_eq!(timestamp.len(), "2026-11-05_10-00-00".len(), "{name}");
     let log = std::fs::read_to_string(&log_path).unwrap();
@@ -372,8 +372,8 @@ fn a_repeated_sheet_name_names_the_run_log_after_the_merge() {
     let log_path = the_run_log_in(&dir);
     let name = log_path.file_name().unwrap().to_string_lossy().to_string();
     let timestamp = name
-        .strip_prefix("analytical_results_2_merged_")
-        .and_then(|rest| rest.strip_suffix("_some-dataset.run.log"))
+        .strip_prefix("analytical_results_some-dataset_")
+        .and_then(|rest| rest.strip_suffix("_2_merged.run.log"))
         .unwrap_or_else(|| panic!("unexpected run log name {name}"));
     assert_eq!(timestamp.len(), "2026-11-05_10-00-00".len(), "{name}");
     let log = std::fs::read_to_string(&log_path).unwrap();

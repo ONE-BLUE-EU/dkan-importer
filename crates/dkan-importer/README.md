@@ -280,14 +280,14 @@ Example Excel structure:
 - Last, in every run, whether it succeeded or stopped, what became of the CSV file and of the upload, also at the end of the run log:
 
   ```
-  ✅ CSV file saved: analytical_results_(i)_2026-11-07_14-52-21_9e94380f-73d5-4655-9a0f-519adbff655c.csv (3312 row(s))
-  ✅ Uploaded analytical_results_(i)_2026-11-07_14-52-21_9e94380f-73d5-4655-9a0f-519adbff655c.csv and added it to dataset "Arctic Ocean - Arctic Ocean - 2023" (9e94380f-73d5-4655-9a0f-519adbff655c) as a new distribution
+  ✅ CSV file saved: analytical_results_(i)_9e94380f-73d5-4655-9a0f-519adbff655c_2026-11-07_14-52-21.csv (3312 row(s))
+  ✅ Uploaded analytical_results_(i)_9e94380f-73d5-4655-9a0f-519adbff655c_2026-11-07_14-52-21.csv and added it to dataset "Arctic Ocean - Arctic Ocean - 2023" (9e94380f-73d5-4655-9a0f-519adbff655c) as a new distribution
   ```
 
   The CSV file is saved in the current directory, beside the run log, before it is uploaded under the same name, so the file sent is kept even when the upload fails. A run that stops ends instead with `❌ CSV file not generated` and `❌ Nothing uploaded`; one that stops later says how far it got: the CSV generated but not saved (`❌ CSV file generated (3312 row(s)), but not saved as ...`, and nothing uploaded), saved but not uploaded (`❌ Nothing uploaded`), uploaded to its URL but not added to the dataset (`❌ Uploaded ... to <url>, but not added to dataset ...`), or added in place of a distribution whose file could not be deleted (`⚠️  Uploaded ..., replacing old.csv, whose file could not be deleted`). When it replaces one, the line says so: `..., replacing old.csv, whose file was deleted`.
 
 ### Run Log File
-Every run writes a log in the current directory, named exactly like the run's CSV file but ending in `.run.log`: `<sheet>_<YYYY-MM-DD_HH-MM-SS>_<dataset>.run.log`, lowercase, with the sheet name's spaces as `_`, as in `analytical_results_(i)_2026-11-05_10-00-00_some-dataset.run.log` (for a merge, see [CSV Output](#csv-output)). Each run writes its own log; the newest describes the latest run. It is written even when the run stops, and never contains the password. It holds:
+Every run writes a log in the current directory, named exactly like the run's CSV file but ending in `.run.log`: `<sheet>_<dataset>_<YYYY-MM-DD_HH-MM-SS>.run.log`, lowercase, with the sheet name's spaces as `_`, as in `analytical_results_(i)_some-dataset_2026-11-05_10-00-00.run.log` (for a merge, see [CSV Output](#csv-output)). Each run writes its own log; the newest describes the latest run. It is written even when the run stops, and never contains the password. It holds:
 - First, what the run was given, with the dataset's and the data dictionary's names (their titles in DKAN, read once the login is accepted), then two blank lines:
 
   ```
@@ -348,12 +348,14 @@ Errors:
 ### CSV Output
 Valid data is saved to a CSV file in the current directory, beside the run log, and uploaded under the same name:
 ```
-<sheet>_<YYYY-MM-DD_HH-MM-SS>_<dataset>.csv
+<sheet>_<dataset>_<YYYY-MM-DD_HH-MM-SS>.csv
 ```
 
-A run merging `n` sheets has `<words>_<n>_merged` in place of `<sheet>`, `<words>` being the whole words every sheet name starts with (left out if there are none). Merging "Analytical results (Air)" and "Analytical results (Sediment)" gives:
+What changes least often comes first, so that, sorted by name, the files group by sheet, then by dataset, each group in time order, with each CSV file beside its run log.
+
+A run merging `n` sheets has `<words>` in place of `<sheet>`, the whole words every sheet name starts with (left out if there are none), and ends in `_<n>_merged`, so that merges into a dataset group together in time order, however many sheets each merged. Merging "Analytical results (Air)" and "Analytical results (Sediment)" gives:
 ```
-analytical_results_2_merged_<YYYY-MM-DD_HH-MM-SS>_<dataset>.csv
+analytical_results_<dataset>_<YYYY-MM-DD_HH-MM-SS>_2_merged.csv
 ```
 
 ## Authentication

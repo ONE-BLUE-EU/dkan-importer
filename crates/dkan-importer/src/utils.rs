@@ -2,9 +2,11 @@ use crate::import::SheetNames;
 use excel_core::utils::{get_local_datetime_with_format, normalize_string};
 
 /// The files a run writes, named alike so they sort together:
-/// `<sheet>_<YYYY-MM-DD_HH-MM-SS>_<dataset>`, lowercase, with the sheet name's spaces as `_`.
-/// A run merging `n` sheets has `<words>_<n>_merged` in place of `<sheet>`, `<words>` being the
-/// words every sheet name starts with, if any, as in `analytical_results_5_merged`.
+/// `<sheet>_<dataset>_<YYYY-MM-DD_HH-MM-SS>`, lowercase, with the sheet name's spaces as `_`.
+/// What changes least often comes first, so that sorted by name the files group by sheet, then
+/// by dataset, each group in time order. A run merging `n` sheets has `<words>` in place of
+/// `<sheet>`, the words every sheet name starts with, if any, and ends in `_<n>_merged`, as in
+/// `analytical_results_<dataset>_<YYYY-MM-DD_HH-MM-SS>_5_merged`.
 pub struct RunFiles {
     /// The CSV file uploaded to DKAN
     pub csv: String,
@@ -21,18 +23,16 @@ impl RunFiles {
 
     /// The files of a run starting at `timestamp`
     pub fn at(dataset_id: &str, sheets: &SheetNames, timestamp: &str) -> Self {
-        let sheets = match sheets.merged() {
-            None => normalize_string(sheets.first()),
-            Some(count) => {
-                let words = shared_leading_words(sheets);
-                if words.is_empty() {
-                    format!("{count} merged")
-                } else {
-                    format!("{words} {count} merged")
-                }
-            }
+        let (sheet, merged) = match sheets.merged() {
+            None => (normalize_string(sheets.first()), String::new()),
+            Some(count) => (shared_leading_words(sheets), format!("_{count}_merged")),
         };
-        let stem = format!("{}_{timestamp}_{dataset_id}", sheets.replace(' ', "_")).to_lowercase();
+        let start = if sheet.is_empty() {
+            String::new()
+        } else {
+            format!("{}_", sheet.replace(' ', "_"))
+        };
+        let stem = format!("{start}{dataset_id}_{timestamp}{merged}").to_lowercase();
         RunFiles {
             csv: format!("{stem}.csv"),
             log: format!("{stem}.run.log"),
@@ -78,8 +78,8 @@ mod tests {
             "2026-11-05_10-00-00",
         );
 
-        let expected_csv = "test_sheet_with_spaces_2026-11-05_10-00-00_1234567890.csv";
-        let expected_log = "test_sheet_with_spaces_2026-11-05_10-00-00_1234567890.run.log";
+        let expected_csv = "test_sheet_with_spaces_1234567890_2026-11-05_10-00-00.csv";
+        let expected_log = "test_sheet_with_spaces_1234567890_2026-11-05_10-00-00.run.log";
         assert_eq!(files.csv, expected_csv);
         assert_eq!(files.log, expected_log);
     }
@@ -97,8 +97,8 @@ mod tests {
             "2026-11-05_10-00-00",
         );
 
-        let expected_csv = "analytical_results_3_merged_2026-11-05_10-00-00_ds-1.csv";
-        let expected_log = "analytical_results_3_merged_2026-11-05_10-00-00_ds-1.run.log";
+        let expected_csv = "analytical_results_ds-1_2026-11-05_10-00-00_3_merged.csv";
+        let expected_log = "analytical_results_ds-1_2026-11-05_10-00-00_3_merged.run.log";
         assert_eq!(files.csv, expected_csv);
         assert_eq!(files.log, expected_log);
     }
@@ -107,7 +107,48 @@ mod tests {
     fn the_files_of_a_merge_of_sheets_sharing_no_words_are_named_by_the_number_of_sheets() {
         let files = RunFiles::at("ds-1", &sheets(&["Water", "Air"]), "2026-11-05_10-00-00");
 
-        assert_eq!(files.csv, "2_merged_2026-11-05_10-00-00_ds-1.csv");
+        assert_eq!(files.csv, "ds-1_2026-11-05_10-00-00_2_merged.csv");
+    }
+
+    /// Sorted by name, the files group by sheet, then by dataset, each group in time order,
+    /// merged or not
+    #[test]
+    fn sorted_by_name_the_files_group_by_sheet_then_dataset_then_time() {
+        let air = sheets(&["Analytical results (Air)"]);
+        let merged = sheets(&["Analytical results (Air)", "Analytical results (Sediment)"]);
+        let runs = [
+            ("ds-2", &air, "2026-11-01_09-00-00"),
+            ("ds-1", &merged, "2026-11-03_09-00-00"),
+            ("ds-1", &air, "2026-11-02_09-00-00"),
+            ("ds-2", &merged, "2026-11-01_08-00-00"),
+            ("ds-1", &air, "2026-11-01_09-00-00"),
+            ("ds-1", &merged, "2026-11-01_10-00-00"),
+        ];
+        let mut names: Vec<String> = runs
+            .iter()
+            .flat_map(|(dataset, sheets, timestamp)| {
+                let files = RunFiles::at(dataset, sheets, timestamp);
+                [files.csv, files.log]
+            })
+            .collect();
+
+        names.sort();
+
+        let expected = vec![
+            "analytical_results_(air)_ds-1_2026-11-01_09-00-00.csv",
+            "analytical_results_(air)_ds-1_2026-11-01_09-00-00.run.log",
+            "analytical_results_(air)_ds-1_2026-11-02_09-00-00.csv",
+            "analytical_results_(air)_ds-1_2026-11-02_09-00-00.run.log",
+            "analytical_results_(air)_ds-2_2026-11-01_09-00-00.csv",
+            "analytical_results_(air)_ds-2_2026-11-01_09-00-00.run.log",
+            "analytical_results_ds-1_2026-11-01_10-00-00_2_merged.csv",
+            "analytical_results_ds-1_2026-11-01_10-00-00_2_merged.run.log",
+            "analytical_results_ds-1_2026-11-03_09-00-00_2_merged.csv",
+            "analytical_results_ds-1_2026-11-03_09-00-00_2_merged.run.log",
+            "analytical_results_ds-2_2026-11-01_08-00-00_2_merged.csv",
+            "analytical_results_ds-2_2026-11-01_08-00-00_2_merged.run.log",
+        ];
+        assert_eq!(names, expected);
     }
 
     /// Whole words only: "Analytical results" and "Analytical resultsX" share "Analytical"
@@ -121,7 +162,7 @@ mod tests {
 
         assert_eq!(
             files.csv,
-            "analytical_2_merged_2026-11-05_10-00-00_ds-1.csv"
+            "analytical_ds-1_2026-11-05_10-00-00_2_merged.csv"
         );
     }
 }
