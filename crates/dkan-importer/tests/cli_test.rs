@@ -245,14 +245,17 @@ fn help_groups_the_unpivot_flags_with_their_default_and_an_example() {
         unpivot_section.contains("--values-markers <MARKER>..."),
         "{help}"
     );
-    assert!(unpivot_section.contains("[default: <LOD <LOQ X]"), "{help}");
+    assert!(
+        unpivot_section.contains("[default: <LOD <LOQ <MLOD <MLOQ X]"),
+        "{help}"
+    );
     assert!(
         unpivot_section.contains("--marker-limits <MARKER=FIELD>..."),
         "{help}"
     );
     assert!(
         unpivot_section
-            .contains("[default: \"<LOD=Limit of detection\" \"<LOQ=Limit of quantification\"]"),
+            .contains("[default: \"<LOD=Limit of detection\" \"<LOQ=Limit of quantification\" \"<MLOD=Limit of detection\" \"<MLOQ=Limit of quantification\"]"),
         "{help}"
     );
     assert!(

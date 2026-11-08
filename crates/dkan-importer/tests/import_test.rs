@@ -801,7 +801,7 @@ fn the_questions_are_printed_and_logged_numbered() {
 
     assert_eq!(outcome.error, None);
     let questions = "Questions to data owners:
-Q1 (1 cell): Results between the Limit of detection and the Limit of quantification, and \"<LOQ\" results, are imported as \"detected, not quantified\". The template's dropdown list does not have this value: it has \"detected semiquantitatively\". Which should be used?
+Q1 (1 cell): Results between the Limit of detection and the Limit of quantification, and \"<LOQ\" and \"<MLOQ\" results, are imported as \"detected, not quantified\". The template's dropdown list does not have this value: it has \"detected semiquantitatively\". Which should be used?
 ";
     assert!(outcome.stdout.contains(questions), "{}", outcome.stdout);
     assert!(outcome.log.contains(questions), "{}", outcome.log);

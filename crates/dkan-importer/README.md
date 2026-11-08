@@ -56,8 +56,8 @@ cargo run -- --base-url https://dkan.example.com --excel-file ./data/sample-data
 - **`--unpivot`** (optional) - Unpivot the sheet: one row per sample cell. Requires `--headers-column`. See [Unpivoting a wide sheet](#unpivoting-a-wide-sheet)
 - **`--headers-column`** (with `--unpivot` only) - The data dictionary field that receives each sample column's header
 - **`--values-column`** (with `--unpivot` only) - The data dictionary field that receives each sample cell's value (defaults to "Concentration")
-- **`--values-markers`** (with `--unpivot` only) - The text a sample cell may hold instead of a number when the values column is a text field (defaults to `<LOD` `<LOQ` `X`). See [Markers instead of numbers](#markers-instead-of-numbers)
-- **`--marker-limits`** (with `--unpivot` only) - The markers that may be followed by their limit, as `MARKER=FIELD` (defaults to `"<LOD=Limit of detection"` `"<LOQ=Limit of quantification"`). See [A marker followed by its limit](#a-marker-followed-by-its-limit)
+- **`--values-markers`** (with `--unpivot` only) - The text a sample cell may hold instead of a number when the values column is a text field (defaults to `<LOD` `<LOQ` `<MLOD` `<MLOQ` `X`). See [Markers instead of numbers](#markers-instead-of-numbers)
+- **`--marker-limits`** (with `--unpivot` only) - The markers that may be followed by their limit, as `MARKER=FIELD` (defaults to `"<LOD=Limit of detection"` `"<LOQ=Limit of quantification"` `"<MLOD=Limit of detection"` `"<MLOQ=Limit of quantification"`). See [A marker followed by its limit](#a-marker-followed-by-its-limit)
 - **`--extra-columns-to [FIELD]`** (optional, not with `--unpivot`) - Move the columns that are not data dictionary fields into FIELD as JSON instead of refusing them (FIELD defaults to "Remark 1"). See [Keeping extra columns](#keeping-extra-columns)
 
 ### Unpivoting a wide sheet
@@ -98,7 +98,7 @@ Okadaic acid   | ST02_Surface | 0.40
 
 #### Markers instead of numbers
 
-Some results are not numbers: `<LOD` (below the limit of detection), `<LOQ` (below the limit of quantification) or `X` (detected, in a Peak Area row). The limits themselves are in their own columns, so these markers are kept as written. That needs a values column that is a text field (`string`) in the data dictionary. A number field refuses them as type mismatches.
+Some results are not numbers: `<LOD` (below the limit of detection), `<LOQ` (below the limit of quantification), `<MLOD` and `<MLOQ` (the same, from labs reporting against the method's limits, which are then the row's limits) or `X` (detected, in a Peak Area row). The limits themselves are in their own columns, so these markers are kept as written. That needs a values column that is a text field (`string`) in the data dictionary. A number field refuses them as type mismatches.
 
 A text field would accept any text, so the importer checks every non-blank sample cell: it must be a number or one of the `--values-markers`. Anything else, such as `<LDO` or `n.d.`, is a validation error at its source row:
 
@@ -106,13 +106,13 @@ A text field would accept any text, so the importer checks every non-blank sampl
 Invalid format at row[2]./Concentration: '<LDO' is not a number or one of the markers <LOD, <LOQ
 ```
 
-- The default markers are `<LOD`, `<LOQ` and `X`. Giving `--values-markers` replaces them, so list all of them: `--values-markers "<LOD" "<LOQ" "X" "<MDL"`. A marker other than these three has no detection characterisation yet, so its cells give no row and a question in the run log.
+- The default markers are `<LOD`, `<LOQ`, `<MLOD`, `<MLOQ` and `X`. Giving `--values-markers` replaces them, so list all of them: `--values-markers "<LOD" "<LOQ" "<MLOD" "<MLOQ" "X" "<MDL"`. A marker other than these five has no detection characterisation yet, so its cells give no row and a question in the run log.
 - `NS` (no sample) is no result, so a sample cell holding it gives no row, with any values field, like a blank cell. `ND` is treated the same as `NS`. The summary line counts them: `...: 518 row(s); 12 NS or ND (no sample) cell(s) skipped.`, and the run log lists each one. For the same reason neither can be one of the `--values-markers`.
 - `<LQ` and `NQ` are refused, even when given in `--values-markers`: they map to `<LOQ`, so change them in the source file, for consistency. A sample cell with either (any case, also with a limit, as in `<LQ:0.25`) is a validation error saying so: `'<LQ' is not allowed: <LQ maps to <LOQ. Change it to <LOQ in the source file, for consistency.`
 - Markers match ignoring case and are written uppercase, so `<lod` is uploaded as `<LOD`, also when given in `--values-markers` or `--marker-limits`. Spaces around a cell's text are ignored, so `<LOQ ` is `<LOQ`.
 - Numbers are uploaded as Excel stores them (`0.880999866251062`).
 - With a number field the markers are not used, because the field already refuses all text.
-- The summary line ends with the rule, for example `... 518 row(s). Concentration takes numbers or <LOD, <LOQ, X.`
+- The summary line ends with the rule, for example `... 518 row(s). Concentration takes numbers or <LOD, <LOQ, <MLOD, <MLOQ, X.`
 
 #### A marker followed by its limit
 
@@ -125,9 +125,9 @@ Invalid format at row[2]./Concentration: '<LOQ:0.3' does not end with the row's 
 Invalid format at row[3]./Concentration: '<LOQ:0.25' has a number, but the row has no Limit of quantification
 ```
 
-- The default limits are `"<LOD=Limit of detection"` and `"<LOQ=Limit of quantification"`. Giving `--marker-limits` replaces them. A marker without a limit takes no number.
+- The default limits are `"<LOD=Limit of detection"`, `"<LOQ=Limit of quantification"`, `"<MLOD=Limit of detection"` and `"<MLOQ=Limit of quantification"`. Giving `--marker-limits` replaces them. A marker without a limit takes no number.
 - A limit for a marker that is not one of the `--values-markers` does not apply. Its field must be a data dictionary field, or the run stops before reading any rows.
-- The summary line counts the cells written as the marker alone, for example `... Concentration takes numbers or <LOD, <LOQ, X. 375 value(s) written as their marker alone, the number after it being the row's limit: <LOD (Limit of detection), <LOQ (Limit of quantification).`
+- The summary line counts the cells written as the marker alone, for example `... Concentration takes numbers or <LOD, <LOQ, <MLOD, <MLOQ, X. 375 value(s) written as their marker alone, the number after it being the row's limit: <LOD (Limit of detection), <LOQ (Limit of quantification), <MLOD (Limit of detection), <MLOQ (Limit of quantification).`
 
 #### Detection characterisation
 
@@ -136,8 +136,8 @@ Each result's "Detection characterisation" is worked out from its row's "Concent
 | Units | Result | Detection characterisation |
 | ----- | ------ | -------------------------- |
 | a concentration | a number at least the limit of quantification | detected quantitatively |
-| a concentration | a number from the limit of detection up to the limit of quantification, or `<LOQ` | detected, not quantified |
-| a concentration | a number below the limit of detection, or `<LOD` | not detected |
+| a concentration | a number from the limit of detection up to the limit of quantification, or `<LOQ` or `<MLOQ` | detected, not quantified |
+| a concentration | a number below the limit of detection, or `<LOD` or `<MLOD` | not detected |
 | a concentration, the row without a limit of quantification | a number not below the limit of detection, if any | detected quantitatively (asked about) |
 | Peak Area | `X` | detected qualitatively |
 | none | `X` | detected qualitatively (taken as Peak Area; the units stay empty) |
@@ -160,7 +160,7 @@ Each result's "Detection characterisation" is worked out from its row's "Concent
 
   ```
   Questions to data owners:
-  Q1 (14 cells): Results between the Limit of detection and the Limit of quantification, and "<LOQ" results, are imported as "detected, not quantified". The template's dropdown list does not have this value: it has "detected semiquantitatively". Which should be used?
+  Q1 (14 cells): Results between the Limit of detection and the Limit of quantification, and "<LOQ" and "<MLOQ" results, are imported as "detected, not quantified". The template's dropdown list does not have this value: it has "detected semiquantitatively". Which should be used?
   Q2 (3 cells): X results in rows with concentration units (ng/L, ng/mL, ng/m3, µg/m3, ng/g, µg/g) are not imported, as X is a Peak Area result. Are the units or the results wrong?
   ```
 

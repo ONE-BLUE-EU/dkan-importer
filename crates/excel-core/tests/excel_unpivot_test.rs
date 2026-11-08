@@ -233,7 +233,7 @@ fn blank_sample_cells_in_every_form_produce_no_row() {
         "Azaspiracid-2,ST01,1.25",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
-    let expected = "Keeping 5 column(s) A-E (Substance … Limit of quantification); unpivoting 3 column(s) F-H (ST01 … ST03) into Sample Tag / Concentration: 1 row(s); 5 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ, X.";
+    let expected = "Keeping 5 column(s) A-E (Substance … Limit of quantification); unpivoting 3 column(s) F-H (ST01 … ST03) into Sample Tag / Concentration: 1 row(s); 5 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ, <MLOD, <MLOQ, X.";
     assert_eq!(unpivoted.summary, expected);
 }
 
@@ -568,7 +568,7 @@ fn given_markers_replace_the_default_ones() {
 fn the_summary_of_a_text_values_field_names_the_markers() {
     let unpivoted = run_with_schema(&wide_sheet(), spec(), text_schema()).unwrap();
 
-    let expected = "Keeping 5 column(s) A-E (Substance … Limit of quantification); unpivoting 2 column(s) F-G (ST01 … ST02) into Sample Tag / Concentration: 3 row(s); 1 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ, X.";
+    let expected = "Keeping 5 column(s) A-E (Substance … Limit of quantification); unpivoting 2 column(s) F-G (ST01 … ST02) into Sample Tag / Concentration: 3 row(s); 1 blank sample cell(s) skipped. Concentration takes numbers or <LOD, <LOQ, <MLOD, <MLOQ, X.";
     assert_eq!(unpivoted.summary, expected);
 }
 
@@ -615,7 +615,7 @@ fn a_marker_followed_by_the_rows_limit_is_written_as_the_marker() {
         "Okadaic acid,ST03,0.3",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
-    let expected_summary = "Concentration takes numbers or <LOD, <LOQ, X. 2 value(s) written as their marker alone, the number after it being the row's limit: <LOD (Limit of detection), <LOQ (Limit of quantification).";
+    let expected_summary = "Concentration takes numbers or <LOD, <LOQ, <MLOD, <MLOQ, X. 2 value(s) written as their marker alone, the number after it being the row's limit: <LOD (Limit of detection), <LOQ (Limit of quantification), <MLOD (Limit of detection), <MLOQ (Limit of quantification).";
     assert!(
         unpivoted.summary.ends_with(expected_summary),
         "{}",
@@ -632,7 +632,7 @@ fn without_such_values_the_summary_does_not_mention_limits() {
     assert!(
         unpivoted
             .summary
-            .ends_with("Concentration takes numbers or <LOD, <LOQ, X."),
+            .ends_with("Concentration takes numbers or <LOD, <LOQ, <MLOD, <MLOQ, X."),
         "{}",
         unpivoted.summary
     );
@@ -1099,7 +1099,7 @@ fn ns_cells_give_no_row_and_are_counted() {
         "Okadaic acid,ST03,0.4",
     ];
     assert_eq!(unpivoted.csv_lines, expected);
-    let expected = "Keeping 5 column(s) A-E (Substance … Limit of quantification); unpivoting 3 column(s) F-H (ST01 … ST03) into Sample Tag / Concentration: 1 row(s); 2 NS or ND (no sample) cell(s) skipped. Concentration takes numbers or <LOD, <LOQ, X.";
+    let expected = "Keeping 5 column(s) A-E (Substance … Limit of quantification); unpivoting 3 column(s) F-H (ST01 … ST03) into Sample Tag / Concentration: 1 row(s); 2 NS or ND (no sample) cell(s) skipped. Concentration takes numbers or <LOD, <LOQ, <MLOD, <MLOQ, X.";
     assert_eq!(unpivoted.summary, expected);
 }
 
@@ -1247,7 +1247,7 @@ fn ng_l_results_are_characterised_against_the_rows_limits() {
     ];
     assert_eq!(unpivoted.columns(&RESULTS), expected);
     let expected = vec![
-        "4 cell(s): Results between the Limit of detection and the Limit of quantification, and \"<LOQ\" results, are imported as \"detected, not quantified\". The template's dropdown list does not have this value: it has \"detected semiquantitatively\". Which should be used?",
+        "4 cell(s): Results between the Limit of detection and the Limit of quantification, and \"<LOQ\" and \"<MLOQ\" results, are imported as \"detected, not quantified\". The template's dropdown list does not have this value: it has \"detected semiquantitatively\". Which should be used?",
     ];
     assert_eq!(unpivoted.questions, expected);
 }
@@ -1986,7 +1986,7 @@ fn numbers_are_characterised_against_the_limits_the_row_has() {
     assert_eq!(unpivoted.changes, expected);
     let expected = vec![
         "2 cell(s): Numbers in rows without a Limit of quantification are imported as \"detected quantitatively\", unless below the row's Limit of detection. Is that right?",
-        "2 cell(s): Results between the Limit of detection and the Limit of quantification, and \"<LOQ\" results, are imported as \"detected, not quantified\". The template's dropdown list does not have this value: it has \"detected semiquantitatively\". Which should be used?",
+        "2 cell(s): Results between the Limit of detection and the Limit of quantification, and \"<LOQ\" and \"<MLOQ\" results, are imported as \"detected, not quantified\". The template's dropdown list does not have this value: it has \"detected semiquantitatively\". Which should be used?",
     ];
     assert_eq!(unpivoted.questions, expected);
 }
@@ -2124,4 +2124,111 @@ fn the_identification_level_of_an_imported_ng_ml_row_is_checked() {
         .error
         .expect("row 2's identification level must stop the run");
     assert!(error.contains("\n  row 2: Cell value: \"1\""), "{error}");
+}
+
+/// Some labs report against the method's limits: "<MLOD" below the method limit of detection,
+/// "<MLOQ" below the method limit of quantification. The row's limits are the method's, so they
+/// mean what "<LOD" and "<LOQ" mean, and are kept as written so the distinction reaches DKAN.
+#[test]
+fn method_limit_markers_are_characterised_like_the_limit_markers_and_kept_as_written() {
+    let rows = analytical_sheet(
+        &["ST01", "ST02", "ST03", "ST04"],
+        vec![vec![
+            Text("detected quantitatively"),
+            Text("ng/L"),
+            Number(0.1),
+            Number(0.3),
+            Text("<MLOD"),
+            Text(" <mlod "),
+            Text("<MLOQ"),
+            Number(1.7),
+        ]],
+    );
+
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
+
+    let expected = vec![
+        "Sample Tag,Concentration,Concentration units,Detection characterisation",
+        "ST01,<MLOD,ng/L,not detected",
+        "ST02,<MLOD,ng/L,not detected",
+        "ST03,<MLOQ,ng/L,detected, not quantified",
+        "ST04,1.7,ng/L,detected quantitatively",
+    ];
+    assert_eq!(unpivoted.columns(&UNITS_RESULTS), expected);
+    let derived = "Imported with Detection characterisation";
+    let was = "instead of the sheet's \"detected quantitatively\", because";
+    let expected = vec![
+        format!(
+            "row 2, column G \"ST01\": Cell value: \"<MLOD\". {derived} \"not detected\" {was} \"<MLOD\" means below the Limit of detection."
+        ),
+        "row 2, column H \"ST02\": Cell value: \" <mlod \". Imported as \"<MLOD\", because markers are written in capitals.".to_string(),
+        format!(
+            "row 2, column H \"ST02\": Cell value: \" <mlod \". {derived} \"not detected\" {was} \"<MLOD\" means below the Limit of detection."
+        ),
+        format!(
+            "row 2, column I \"ST03\": Cell value: \"<MLOQ\". {derived} \"detected, not quantified\" {was} \"<MLOQ\" means detected, but below the Limit of quantification. See Q1."
+        ),
+    ];
+    assert_eq!(unpivoted.changes, expected);
+    let expected = vec![
+        "1 cell(s): Results between the Limit of detection and the Limit of quantification, and \"<LOQ\" and \"<MLOQ\" results, are imported as \"detected, not quantified\". The template's dropdown list does not have this value: it has \"detected semiquantitatively\". Which should be used?",
+    ];
+    assert_eq!(unpivoted.questions, expected);
+}
+
+/// Like "<LOD:0.1", a method limit marker may be followed by the row's limit
+#[test]
+fn a_method_limit_marker_followed_by_the_rows_limit_is_written_as_the_marker() {
+    let rows = limits_sheet(
+        Number(0.25),
+        [Text("<MLOQ:0.25"), Text("<MLOD : 0.100"), Number(0.3)],
+    );
+
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
+
+    let expected = vec![
+        "Substance,Sample Tag,Concentration",
+        "Okadaic acid,ST01,<MLOQ",
+        "Okadaic acid,ST02,<MLOD",
+        "Okadaic acid,ST03,0.3",
+    ];
+    assert_eq!(unpivoted.csv_lines, expected);
+}
+
+#[test]
+fn a_method_limit_marker_followed_by_another_number_is_a_validation_error() {
+    let rows = limits_sheet(
+        Number(0.25),
+        [Text("<MLOQ:0.3"), Text("<MLOD:0.2"), Number(0.3)],
+    );
+
+    let err = run_with_schema(&rows, spec(), text_schema()).unwrap_err();
+
+    let expected = [
+        "row[2]./Concentration: '<MLOQ:0.3' does not end with the row's Limit of quantification (0.25)",
+        "row[2]./Concentration: '<MLOD:0.2' does not end with the row's Limit of detection (0.1)",
+    ];
+    for expected in expected {
+        assert!(err.contains(expected), "{expected}\n{err}");
+    }
+}
+
+/// Like "<LOD", "<MLOD" has no meaning in a Peak Area row
+#[test]
+fn a_method_limit_marker_in_a_peak_area_row_gives_no_row_and_a_question() {
+    let rows = analytical_sheet(
+        &["ST01"],
+        vec![
+            vec![Empty, Text("Peak Area"), Empty, Empty, Text("<MLOD")],
+            // A sheet without any result to import is refused as empty
+            vec![Empty, Text("Peak Area"), Empty, Empty, Text("X")],
+        ],
+    );
+
+    let unpivoted = run_with_schema(&rows, spec(), text_schema()).unwrap();
+
+    let expected = vec![
+        "1 cell(s): \"<MLOD\" in a row with Concentration units \"Peak Area\" is not imported. What does it mean?",
+    ];
+    assert_eq!(unpivoted.questions, expected);
 }

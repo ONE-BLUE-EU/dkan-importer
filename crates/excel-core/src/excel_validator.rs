@@ -290,7 +290,7 @@ impl std::fmt::Display for Question {
             ),
             Question::DetectedNotQuantified => write!(
                 f,
-                "Results between the {LOD_FIELD} and the {LOQ_FIELD}, and \"{LOQ_MARKER}\" results, are imported as \"{DETECTED_NOT_QUANTIFIED}\". The template's dropdown list does not have this value: it has \"detected semiquantitatively\". Which should be used?"
+                "Results between the {LOD_FIELD} and the {LOQ_FIELD}, and \"{LOQ_MARKER}\" and \"{METHOD_LOQ_MARKER}\" results, are imported as \"{DETECTED_NOT_QUANTIFIED}\". The template's dropdown list does not have this value: it has \"detected semiquantitatively\". Which should be used?"
             ),
         }
     }
@@ -631,13 +631,13 @@ fn characterise(
                 question: Question::XInConcentration,
                 reason: format!("\"X\" is a Peak Area result, but the row is in {units}"),
             },
-            SampleResult::Marker(LOD_MARKER) => characterised(
+            SampleResult::Marker(marker @ (LOD_MARKER | METHOD_LOD_MARKER)) => characterised(
                 NOT_DETECTED,
-                format!("\"{LOD_MARKER}\" means below the {LOD_FIELD}"),
+                format!("\"{marker}\" means below the {LOD_FIELD}"),
             ),
-            SampleResult::Marker(LOQ_MARKER) => characterised(
+            SampleResult::Marker(marker @ (LOQ_MARKER | METHOD_LOQ_MARKER)) => characterised(
                 DETECTED_NOT_QUANTIFIED,
-                format!("\"{LOQ_MARKER}\" means detected, but below the {LOQ_FIELD}"),
+                format!("\"{marker}\" means detected, but below the {LOQ_FIELD}"),
             ),
             SampleResult::Marker(_) => unclassified(Some(units.to_string())),
             SampleResult::Number(n) => characterise_number(*n, lod, loq),
@@ -986,20 +986,37 @@ impl std::str::FromStr for MarkerLimit {
 
 /// The limit columns analytical results sheets have for [`DEFAULT_VALUES_MARKERS`], as
 /// `MARKER=FIELD`.
-pub const DEFAULT_MARKER_LIMITS: [&str; 2] =
-    ["<LOD=Limit of detection", "<LOQ=Limit of quantification"];
+pub const DEFAULT_MARKER_LIMITS: [&str; 4] = [
+    "<LOD=Limit of detection",
+    "<LOQ=Limit of quantification",
+    "<MLOD=Limit of detection",
+    "<MLOQ=Limit of quantification",
+];
 
 /// The markers analytical results use in place of a concentration:
 /// - `<LOD`: below the limit of detection (the substance was not detected)
 /// - `<LOQ`: below the limit of quantification (detected, but too little to measure)
+/// - `<MLOD`, `<MLOQ`: the same, written by labs reporting against the method's limits, which
+///   are then the row's limits
 /// - `X`: detected, in a Peak Area row (or a row without units)
 ///
 /// The limits themselves are in their own columns ("Limit of detection", "Limit of
 /// quantification"), so the markers are kept as written rather than replaced by a number.
-pub const DEFAULT_VALUES_MARKERS: [&str; 3] = [LOD_MARKER, LOQ_MARKER, X_MARKER];
+pub const DEFAULT_VALUES_MARKERS: [&str; 5] = [
+    LOD_MARKER,
+    LOQ_MARKER,
+    METHOD_LOD_MARKER,
+    METHOD_LOQ_MARKER,
+    X_MARKER,
+];
 
 const LOD_MARKER: &str = "<LOD";
 const LOQ_MARKER: &str = "<LOQ";
+/// Below the method limit of detection: the row's [`LOD_FIELD`], when the lab reports this one
+const METHOD_LOD_MARKER: &str = "<MLOD";
+/// Below the method limit of quantification: the row's [`LOQ_FIELD`], when the lab reports this
+/// one
+const METHOD_LOQ_MARKER: &str = "<MLOQ";
 const X_MARKER: &str = "X";
 
 /// A sample cell meaning no sample was taken at that station or depth. There is no result, so
